@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import string
 import time
@@ -22,6 +23,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     DatabaseRequires,
 )
+from charms.data_platform_libs.v0.s3 import S3Requirer
 from charms.odk_central_k8s.v0.odk_enketo import (
     ENKETO_PORT,
     SECRET_LABEL_API_KEY,
@@ -71,6 +73,19 @@ CONFIG_PATH = "/usr/odk/config/local.json"
 MIGRATIONS_COMMAND = ["node", "./lib/bin/run-migrations"]
 SERVER_COMMAND = "npx --no pm2-runtime ./pm2.config.js"
 
+# Upstream's odk-cmd is a two-line wrapper around this. Calling the script
+# directly keeps the exec's argv explicit.
+CLI_COMMAND = ["node", "./lib/bin/cli.js"]
+PURGE_COMMAND = ["node", "./lib/bin/purge.js"]
+S3_COMMAND = ["node", "./lib/bin/s3.js"]
+
+SECRET_LABEL_ADMIN_PASSWORD = "odk-admin-password"
+
+# Long enough to be safe, short enough to be typed once if it has to be.
+GENERATED_PASSWORD_LENGTH = 24
+
+ACTION_TIMEOUT = 600
+
 # /v1/config/public is the only unauthenticated endpoint that also touches the
 # database, so it proves the API and its database are both working. There is no
 # /v1/version.json: the deployed version is a static file served by nginx.
@@ -99,6 +114,38 @@ VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
 # ASCII only, so that a character count is also a byte count. Upstream asserts
 # on the byte length of the secret files.
 SECRET_ALPHABET = string.ascii_letters + string.digits
+
+
+_STACK_FRAME = re.compile(r"^\s+at\s")
+
+
+def _tail(output: str, lines: int = 50) -> str:
+    """Return the last few lines of command output, for an action result."""
+    return "\n".join(output.splitlines()[-lines:])
+
+
+def _reason(exc: ops.pebble.ExecError[str]) -> str:
+    """Return the most useful message from a failed exec.
+
+    Central's CLI is a Node program, so a failure arrives as a stack trace.
+    The line an operator needs is the error itself, near the top; the tail is
+    module-loader frames that say nothing. Stack frames are dropped and the
+    error line is preferred.
+    """
+    text = str(exc.stderr or exc.stdout or exc)
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        # Stack frames, the caret pointer, and the re-thrown source line.
+        if line.strip() and not _STACK_FRAME.match(line) and line.strip() not in {"^"}
+    ]
+    if not lines:
+        return f"exited {exc.exit_code}"
+
+    for index, line in enumerate(lines):
+        if "Error" in line or "error" in line:
+            return " ".join(lines[index : index + 2])[:500]
+    return " ".join(lines[:2])[:500]
 
 
 class MigrationError(Exception):
@@ -132,6 +179,11 @@ class OdkCentralCharm(ops.CharmBase):
         )
         self.xlsform = XlsformRequirer(self)
         self.enketo = OdkEnketoProvider(self)
+        self.s3 = S3Requirer(
+            self,
+            relation_name="s3",
+            bucket_name=str(self.config["s3-bucket-name"]) or None,
+        )
         self.ingress = IngressPerAppRequirer(
             self,
             relation_name="ingress",
@@ -156,9 +208,22 @@ class OdkCentralCharm(ops.CharmBase):
             self.ingress.on.ready,
             self.ingress.on.revoked,
             self.enketo.on.enketo_url_changed,
+            self.s3.on.credentials_changed,
+            self.s3.on.credentials_gone,
             self.on[NGINX_CONTAINER].pebble_ready,
         ):
             framework.observe(event, self._on_lifecycle_event)
+
+        for action, handler in (
+            ("create_admin", self._on_create_admin_action),
+            ("promote_user", self._on_promote_user_action),
+            ("reset_password", self._on_reset_password_action),
+            ("rotate_enketo_secrets", self._on_rotate_enketo_secrets_action),
+            ("run_migrations", self._on_run_migrations_action),
+            ("upload_pending_blobs", self._on_upload_pending_blobs_action),
+            ("purge_deleted", self._on_purge_deleted_action),
+        ):
+            framework.observe(getattr(self.on, f"{action}_action"), handler)
 
     # Event handling
 
@@ -373,6 +438,31 @@ class OdkCentralCharm(ops.CharmBase):
             return {"orgSubdomain": "", "key": "", "project": "", "traceRate": ""}
         return {"dsn": dsn, "traceRate": "0.1"}
 
+    def _s3_config(self) -> dict[str, str]:
+        """Return the blob store settings, or an empty mapping when unrelated.
+
+        New blobs go to S3 as soon as this relation exists. Blobs already in
+        PostgreSQL stay there until the upload-pending-blobs action moves them,
+        so a deployment can sit in a partially migrated state indefinitely.
+        """
+        if not self.model.relations.get("s3"):
+            return {}
+
+        info = self.s3.get_s3_connection_info()
+        access_key = info.get("access-key")
+        secret_key = info.get("secret-key")
+        bucket = str(self.config["s3-bucket-name"]).strip() or info.get("bucket")
+        endpoint = info.get("endpoint")
+        if not (access_key and secret_key and bucket and endpoint):
+            return {}
+
+        return {
+            "server": endpoint,
+            "accessKey": access_key,
+            "secretKey": secret_key,
+            "bucketName": bucket,
+        }
+
     def _render_service_config(
         self, database: dict[str, Any], shared_secrets: EnketoSecrets
     ) -> dict[str, Any]:
@@ -412,6 +502,7 @@ class OdkCentralCharm(ops.CharmBase):
                         "accessKey": "",
                         "secretKey": "",
                         "bucketName": "",
+                        **self._s3_config(),
                         "requestTimeout": 60000,
                     },
                 },
@@ -668,6 +759,287 @@ class OdkCentralCharm(ops.CharmBase):
             if time.monotonic() >= deadline:
                 return False
             time.sleep(API_POLL_INTERVAL)
+
+    # Day-2 actions
+
+    def _service_container(self, event: ops.ActionEvent) -> ops.Container | None:
+        """Return the service container, failing the action if it is not ready."""
+        container = self.unit.get_container(SERVICE_CONTAINER)
+        if not container.can_connect():
+            event.fail("The service container is not ready.")
+            return None
+        return container
+
+    def _refuse_under_oidc(self, event: ops.ActionEvent, what: str) -> bool:
+        """Fail the action when OIDC makes it meaningless, and say why."""
+        if not self.config["oidc-enabled"]:
+            return False
+        event.fail(
+            f"{what} is not possible while oidc-enabled is true: OpenID Connect "
+            "replaces password authentication entirely, so a password would have "
+            "no effect. Manage this user at your identity provider instead."
+        )
+        return True
+
+    def _run_cli(
+        self,
+        container: ops.Container,
+        args: list[str],
+        stdin: str | None = None,
+    ) -> str:
+        """Run Central's admin CLI and return its output.
+
+        :raises ops.pebble.ExecError: if the command exits non-zero.
+        """
+        process = container.exec(
+            [*CLI_COMMAND, *args],
+            working_dir=WORKING_DIR,
+            environment=self._service_environment(),
+            timeout=ACTION_TIMEOUT,
+            # The CLI prompts for passwords rather than taking them as
+            # arguments, which also keeps them out of the process table.
+            stdin=stdin,
+        )
+        output, _ = process.wait_output()
+        return output
+
+    def _admin_email(self) -> str | None:
+        """Return the initial administrator's address from its Juju secret."""
+        secret_id = str(self.config.get("admin-email-secret") or "").strip()
+        if not secret_id:
+            return None
+        try:
+            content = self.model.get_secret(id=secret_id).get_content(refresh=True)
+        except (ops.SecretNotFoundError, ops.ModelError):
+            return None
+        return content.get("email")
+
+    def _admin_password(self) -> str:
+        """Return the administrator password, generating it once if needed."""
+        try:
+            secret = self.model.get_secret(label=SECRET_LABEL_ADMIN_PASSWORD)
+        except ops.SecretNotFoundError:
+            password = generate_secret(GENERATED_PASSWORD_LENGTH)
+            self.app.add_secret({"value": password}, label=SECRET_LABEL_ADMIN_PASSWORD)
+            return password
+        content: str = secret.get_content(refresh=True)["value"]
+        return content
+
+    def _on_create_admin_action(self, event: ops.ActionEvent) -> None:
+        """Create the initial web user and promote it to administrator."""
+        if self._refuse_under_oidc(event, "Creating a password user"):
+            return
+        if not self.unit.is_leader():
+            event.fail("Run this on the leader unit; it owns the password secret.")
+            return
+
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        email = self._admin_email()
+        if email is None:
+            event.fail(
+                "No administrator address is configured. Create a Juju secret "
+                "holding it, for example `juju add-secret odk-admin-email "
+                "email=ops@example.com`, grant it to this application, and set "
+                "admin-email-secret to the resulting secret ID."
+            )
+            return
+
+        password = self._admin_password()
+        try:
+            self._run_cli(container, ["-u", email, "user-create"], stdin=f"{password}\n")
+            self._run_cli(container, ["-u", email, "user-promote"])
+        except ops.pebble.ExecError as exc:
+            event.fail(f"Could not create the administrator: {_reason(exc)}")
+            return
+
+        # Returned once. The password is not retrievable afterwards.
+        event.set_results(
+            {
+                "email": email,
+                "password": password,
+                "note": (
+                    "This password is shown once. Store it now; it cannot be "
+                    "retrieved again. Use reset-password if it is lost."
+                ),
+            }
+        )
+
+    def _on_promote_user_action(self, event: ops.ActionEvent) -> None:
+        """Grant an existing user the administrator role."""
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        email = str(event.params["email"])
+        try:
+            self._run_cli(container, ["-u", email, "user-promote"])
+        except ops.pebble.ExecError as exc:
+            event.fail(f"Could not promote {email}: {_reason(exc)}")
+            return
+
+        event.set_results({"email": email, "result": "promoted to administrator"})
+
+    def _on_reset_password_action(self, event: ops.ActionEvent) -> None:
+        """Reset a user's password and return the new value once."""
+        if self._refuse_under_oidc(event, "Resetting a password"):
+            return
+
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        email = str(event.params["email"])
+        password = generate_secret(GENERATED_PASSWORD_LENGTH)
+        try:
+            self._run_cli(container, ["-u", email, "user-set-password"], stdin=f"{password}\n")
+        except ops.pebble.ExecError as exc:
+            event.fail(f"Could not reset the password for {email}: {_reason(exc)}")
+            return
+
+        event.set_results(
+            {
+                "email": email,
+                "password": password,
+                "note": "This password is shown once and is not retrievable afterwards.",
+            }
+        )
+
+    def _on_rotate_enketo_secrets_action(self, event: ops.ActionEvent) -> None:
+        """Regenerate the shared secrets and get both workloads onto the new ones."""
+        if not self.unit.is_leader():
+            event.fail("Run this on the leader unit; it owns the shared secrets.")
+            return
+
+        self.unit.status = ops.MaintenanceStatus("rotating enketo secrets")
+
+        for label, length in SECRET_LENGTHS.items():
+            secret = self.model.get_secret(label=label)
+            secret.set_content({"value": generate_secret(length)})
+
+        # Republish so a relation that has not seen these IDs yet gets them.
+        # Enketo learns about the new values through secret-changed, which is
+        # what actually carries a rotation: the IDs do not change.
+        self.enketo.publish(
+            base_url=self._external_url(),
+            support_email=str(self.config["sysadmin-email"]),
+        )
+
+        # Central holds the API key in its own config too, so it has to be
+        # re-rendered and restarted or the two ends disagree.
+        self._reconcile()
+
+        event.set_results(
+            {
+                "result": "all three shared secrets rotated",
+                "warning": (
+                    "Every in-progress web form session is invalidated. Anyone "
+                    "part-way through filling in a form will have to start again."
+                ),
+            }
+        )
+
+    def _on_run_migrations_action(self, event: ops.ActionEvent) -> None:
+        """Run the database migrations by hand and report what happened."""
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        if self._database_config() is None:
+            event.fail("There is no complete postgresql relation to migrate.")
+            return
+
+        try:
+            output = self._run_migrations(container)
+        except MigrationError as exc:
+            event.fail(f"Migrations exited {exc.exit_code}. Last output:\n{_tail(exc.output)}")
+            return
+
+        event.set_results({"result": "migrations completed", "output": _tail(output)})
+
+    def _on_upload_pending_blobs_action(self, event: ops.ActionEvent) -> None:
+        """Move submission attachments from PostgreSQL to the S3 blob store."""
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        if not self._s3_config():
+            event.set_results(
+                {
+                    "result": "no-op",
+                    "note": (
+                        "There is no s3 relation, so submission attachments stay "
+                        "in PostgreSQL. Relate s3-integrator to enable the blob "
+                        "store."
+                    ),
+                }
+            )
+            return
+
+        before = self._pending_blob_count(container)
+        try:
+            process = container.exec(
+                [*S3_COMMAND, "upload-pending"],
+                working_dir=WORKING_DIR,
+                environment=self._service_environment(),
+                timeout=ACTION_TIMEOUT,
+                combine_stderr=True,
+            )
+            output, _ = process.wait_output()
+        except ops.pebble.ExecError as exc:
+            event.fail(f"Uploading pending blobs failed: {_reason(exc)}")
+            return
+
+        after = self._pending_blob_count(container)
+        event.set_results(
+            {
+                "uploaded": max(0, (before or 0) - (after or 0)),
+                "pending": after if after is not None else "unknown",
+                "output": _tail(output),
+            }
+        )
+
+    def _on_purge_deleted_action(self, event: ops.ActionEvent) -> None:
+        """Permanently remove soft-deleted forms and submissions."""
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        args = list(PURGE_COMMAND)
+        if event.params.get("force"):
+            args.append("--force")
+
+        try:
+            process = container.exec(
+                args,
+                working_dir=WORKING_DIR,
+                environment=self._service_environment(),
+                timeout=ACTION_TIMEOUT,
+                combine_stderr=True,
+            )
+            output, _ = process.wait_output()
+        except ops.pebble.ExecError as exc:
+            event.fail(f"Purge failed: {_reason(exc)}")
+            return
+
+        event.set_results({"result": "purge completed", "output": _tail(output)})
+
+    def _pending_blob_count(self, container: ops.Container) -> int | None:
+        """Return how many blobs are still waiting to move to S3, if knowable."""
+        try:
+            process = container.exec(
+                [*S3_COMMAND, "count-blobs", "pending"],
+                working_dir=WORKING_DIR,
+                environment=self._service_environment(),
+                timeout=60,
+            )
+            output, _ = process.wait_output()
+        except ops.pebble.ExecError:
+            return None
+        digits = "".join(c for c in output if c.isdigit())
+        return int(digits) if digits else None
 
     def _run_migrations(self, container: ops.Container) -> str:
         """Run the database migrations and return their output.
