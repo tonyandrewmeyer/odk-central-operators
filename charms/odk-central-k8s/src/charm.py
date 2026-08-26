@@ -10,9 +10,13 @@ import json
 import logging
 import secrets
 import string
+import time
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import ops
+import requests
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.odk_central_k8s.v0.odk_enketo import (
     SECRET_LABEL_API_KEY,
@@ -22,6 +26,7 @@ from charms.odk_central_k8s.v0.odk_enketo import (
     EnketoSecrets,
 )
 from charms.pyxform_k8s.v0.xlsform import XlsformRequirer
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,23 @@ SERVICE_CONTAINER = "service"
 NGINX_CONTAINER = "nginx"
 
 API_PORT = 8383
+NGINX_PORT = 80
+
+# The published central-nginx image does not contain these templates: upstream's
+# compose bind-mounts them in, so the charm ships and pushes them.
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+NGINX_TEMPLATE_DIR = "/usr/share/odk/nginx"
+NGINX_ENTRYPOINT = "/scripts/setup-odk.sh"
+
+# nginx serves this static file, written into the image at build time. It is
+# what reports the deployed version; there is no API route that does.
+NGINX_HEALTH_PATH = "/version.txt"
+
+# How long a hook will wait for the API to answer before giving up and letting
+# the next event retry. nginx proxies to the API and fails its own start if the
+# API is not there, so the order matters.
+API_READY_TIMEOUT = 60
+API_POLL_INTERVAL = 2
 
 # Paths inside the published central-service image. `service.dockerfile` sets
 # WORKDIR /usr/odk and node-config reads config/local.json from there.
@@ -93,6 +115,14 @@ class OdkCentralCharm(ops.CharmBase):
             database_name=DATABASE_NAME,
         )
         self.xlsform = XlsformRequirer(self)
+        self.ingress = IngressPerAppRequirer(
+            self,
+            relation_name="ingress",
+            # nginx, not the API: Central's frontend and API must be
+            # same-origin, and nginx is what serves the frontend.
+            port=NGINX_PORT,
+            strip_prefix=False,
+        )
 
         for event in (
             self.on.install,
@@ -106,6 +136,9 @@ class OdkCentralCharm(ops.CharmBase):
             self.on["postgresql"].relation_broken,
             self.xlsform.on.xlsform_ready,
             self.xlsform.on.xlsform_gone,
+            self.ingress.on.ready,
+            self.ingress.on.revoked,
+            self.on[NGINX_CONTAINER].pebble_ready,
         ):
             framework.observe(event, self._on_lifecycle_event)
 
@@ -162,8 +195,13 @@ class OdkCentralCharm(ops.CharmBase):
 
         container.add_layer(SERVICE_CONTAINER, self._service_layer(), combine=True)
         container.replan()
-        self.unit.set_ports(API_PORT)
+        self.unit.set_ports(API_PORT, NGINX_PORT)
 
+        if not self._wait_for_api():
+            self.unit.status = ops.WaitingStatus("waiting for the api to become healthy")
+            return
+
+        self._reconcile_nginx()
         self.unit.status = self._status()
 
     def _status(self) -> ops.StatusBase:
@@ -260,15 +298,6 @@ class OdkCentralCharm(ops.CharmBase):
 
     # Rendered workload configuration
 
-    def _base_url(self) -> str:
-        """Return the public base URL Central should advertise."""
-        hostname = str(self.config["external-hostname"]).strip()
-        if hostname:
-            return f"https://{hostname}"
-        # No ingress and no configured hostname yet. Central needs *something*
-        # here; links it generates will be wrong until one is set.
-        return f"http://localhost:{API_PORT}"
-
     def _email_config(self) -> dict[str, Any]:
         """Return the ``email`` stanza.
 
@@ -327,7 +356,7 @@ class OdkCentralCharm(ops.CharmBase):
                     "apiKey": shared_secrets.api_key,
                 },
                 "env": {
-                    "domain": self._base_url(),
+                    "domain": self._external_url(),
                     "sysadminAccount": str(self.config["sysadmin-email"]),
                 },
                 "oidc": {
@@ -398,6 +427,175 @@ class OdkCentralCharm(ops.CharmBase):
                 },
             }
         )
+
+    # nginx and the public frontend
+
+    def _external_url(self) -> str:
+        """Return the URL the deployment is actually reached at.
+
+        The ``external-hostname`` option wins over the ingress relation when
+        both are set, so that an operator can point Central at the name their
+        users type even when it differs from what the ingress advertises.
+        """
+        hostname = str(self.config["external-hostname"]).strip()
+        if hostname:
+            return f"https://{hostname}"
+        if self.ingress.url:
+            return str(self.ingress.url)
+        return f"http://localhost:{API_PORT}"
+
+    def _domain(self) -> str:
+        """Return the bare hostname nginx should serve, without scheme or port."""
+        parsed = urlparse(self._external_url())
+        return parsed.hostname or "localhost"
+
+    def _nginx_environment(self) -> dict[str, str]:
+        """Return the environment setup-odk.sh templates the nginx config from."""
+        dsn = str(self.config["error-reporting-dsn"]).strip()
+        return {
+            "DOMAIN": self._domain(),
+            # TLS terminates at the ingress. This makes the image serve plain
+            # HTTP on 80, strip its ssl_ directives and trust X-Forwarded-Proto.
+            # Never enable certbot inside the charm.
+            "SSL_TYPE": "upstream",
+            "HTTPS_PORT": "443",
+            "OIDC_ENABLED": "true" if self.config["oidc-enabled"] else "false",
+            "ENKETO_UPSTREAM": self._enketo_upstream(),
+            # Upstream's shipped defaults are the ODK project's own Sentry
+            # organisation and key. They are never inherited.
+            "SENTRY_ORG_SUBDOMAIN": "",
+            "SENTRY_KEY": "",
+            "SENTRY_PROJECT": "",
+            "SENTRY_DSN_FRONTEND": dsn,
+        }
+
+    def _enketo_upstream(self) -> str:
+        """Return the host:port nginx should proxy the /- paths to."""
+        # Phase-appropriate placeholder until the odk-enketo relation settles;
+        # nginx must still load a valid configuration in the meantime.
+        return "127.0.0.1:8005"
+
+    def _nginx_config_template(self) -> str:
+        """Return the nginx site template, adjusted for the Sentry setting.
+
+        With no DSN the Sentry variables are blank, and upstream's /csp-report
+        location would render as ``https://.ingest.sentry.io/api//security/``,
+        which nginx refuses to load. Swallow the reports locally instead of
+        proxying them anywhere.
+        """
+        template = (TEMPLATE_DIR / "odk.conf.template").read_text()
+        if str(self.config["error-reporting-dsn"]).strip():
+            return template
+
+        return template.replace(
+            "    proxy_pass https://${SENTRY_ORG_SUBDOMAIN}.ingest.sentry.io"
+            "/api/${SENTRY_PROJECT}/security/?sentry_key=${SENTRY_KEY};\n"
+            "    proxy_ssl_server_name on;\n",
+            "    # No error-reporting DSN is configured, so CSP reports are\n"
+            "    # accepted and discarded rather than forwarded anywhere.\n"
+            "    return 204;\n",
+        )
+
+    def _reconcile_nginx(self) -> None:
+        """Push the nginx templates and (re)start the frontend proxy.
+
+        A change to DOMAIN, OIDC_ENABLED or the Sentry settings is a re-render,
+        not just a restart: the browser reads client-config.json at page load
+        and the entrypoint is what regenerates it. Reloading nginx alone would
+        leave the old client config in place, so the service is restarted, and
+        only when something it depends on has actually changed.
+        """
+        container = self.unit.get_container(NGINX_CONTAINER)
+        if not container.can_connect():
+            return
+
+        template = self._nginx_config_template()
+        changed = self._push_if_changed(
+            container, f"{NGINX_TEMPLATE_DIR}/odk.conf.template", template
+        )
+        changed |= self._push_if_changed(
+            container,
+            f"{NGINX_TEMPLATE_DIR}/client-config.json.template",
+            (TEMPLATE_DIR / "client-config.json.template").read_text(),
+        )
+
+        layer = self._nginx_layer()
+        container.add_layer(NGINX_CONTAINER, layer, combine=True)
+
+        service = container.get_services().get(NGINX_CONTAINER)
+        if service is None or not service.is_running():
+            container.replan()
+            container.start(NGINX_CONTAINER)
+        elif changed or self._nginx_plan_changed(container, layer):
+            container.restart(NGINX_CONTAINER)
+
+    def _nginx_plan_changed(self, container: ops.Container, layer: ops.pebble.Layer) -> bool:
+        """Return whether the running nginx service differs from the wanted one."""
+        current = container.get_plan().services.get(NGINX_CONTAINER)
+        wanted = layer.services[NGINX_CONTAINER]
+        return current is None or current.environment != wanted.environment
+
+    @staticmethod
+    def _push_if_changed(container: ops.Container, path: str, content: str) -> bool:
+        """Push ``content`` to ``path`` and return whether it differed."""
+        try:
+            if container.pull(path).read() == content:
+                return False
+        except (ops.pebble.PathError, ops.pebble.APIError):
+            pass
+        container.push(path, content, make_dirs=True)
+        return True
+
+    def _nginx_layer(self) -> ops.pebble.Layer:
+        """Build the Pebble layer for the nginx frontend proxy."""
+        return ops.pebble.Layer(
+            {
+                "summary": "odk central nginx",
+                "description": "Serves the built frontend and proxies the API and Enketo.",
+                "services": {
+                    NGINX_CONTAINER: {
+                        "override": "replace",
+                        "summary": "nginx",
+                        # The image's own entrypoint: it templates the site
+                        # config and client-config.json, then execs nginx.
+                        "command": NGINX_ENTRYPOINT,
+                        # Started by charm code once the API is healthy. Pebble
+                        # dependencies do not cross container boundaries, so
+                        # the ordering cannot be expressed in the layer.
+                        "startup": "disabled",
+                        "environment": self._nginx_environment(),
+                        "on-failure": "restart",
+                    },
+                },
+                "checks": {
+                    "nginx-up": {
+                        "override": "replace",
+                        "level": "ready",
+                        "period": "15s",
+                        "threshold": 3,
+                        "http": {"url": f"http://localhost:{NGINX_PORT}{NGINX_HEALTH_PATH}"},
+                    },
+                },
+            }
+        )
+
+    def _api_healthy(self) -> bool:
+        """Return whether the API answers on its unauthenticated health route."""
+        try:
+            response = requests.get(f"http://localhost:{API_PORT}{HEALTH_PATH}", timeout=5)
+        except requests.RequestException:
+            return False
+        return response.status_code == 200
+
+    def _wait_for_api(self) -> bool:
+        """Poll the API until it is healthy, or the hook's patience runs out."""
+        deadline = time.monotonic() + API_READY_TIMEOUT
+        while True:
+            if self._api_healthy():
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(API_POLL_INTERVAL)
 
     def _run_migrations(self, container: ops.Container) -> str:
         """Run the database migrations and return their output.

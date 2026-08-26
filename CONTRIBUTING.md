@@ -24,7 +24,7 @@ workspace spanning the three charm directories.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv sync
+uv sync --all-packages
 uv run pre-commit install --install-hooks
 uv run pre-commit install --hook-type commit-msg
 ```

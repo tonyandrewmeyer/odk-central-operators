@@ -31,7 +31,7 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      - run: uv sync --all-packages --frozen
       - name: Verify the config tables match charmcraft.yaml
         run: uv run python scripts/check-docs.py
       - name: Deploy to GitHub Pages

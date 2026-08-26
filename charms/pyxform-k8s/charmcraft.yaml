@@ -43,6 +43,13 @@ parts:
     source: .
     charm-requirements: [requirements.txt]
     charm-strict-dependencies: true
+    # charm-strict-dependencies builds every dependency from source. These
+    # ship compiled extensions -- pydantic-core alone would pull in a Rust
+    # toolchain on every pack -- so they are allowed to install from wheels.
+    charm-binary-python-packages:
+      - charset-normalizer
+      - pydantic-core
+      - pyyaml
 
 containers:
   pyxform:
