@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+from typing import Any
 
 import pytest
 from charm import SECRET_LABEL_ADMIN_PASSWORD, OdkCentralCharm
@@ -801,3 +802,224 @@ def test_rotation_changes_the_relation_databag(
     after = dict(rotated.get_relation(enketo.id).local_app_data)
 
     assert after != before, "Enketo has no way to notice this rotation"
+
+
+def pg_restore_exec(return_code: int = 0, stdout: str = "") -> testing.Exec:
+    """Return a fake exec result for the restore script."""
+    return testing.Exec(command_prefix=["sh"], return_code=return_code, stdout=stdout)
+
+
+def empty_database_exec() -> testing.Exec:
+    """Return a psql result reporting an empty schema."""
+    return testing.Exec(command_prefix=["psql"], return_code=0, stdout="0\n")
+
+
+def _restore_service(dump: bytes | None = None, **overrides: object) -> testing.Container:
+    """Return a service container ready to restore into an empty database."""
+    return testing.Container(
+        "service",
+        can_connect=True,
+        execs={
+            migrations_exec(),
+            empty_database_exec(),
+            pg_restore_exec(stdout="restored 42 objects"),
+        },
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+def test_restore_downloads_restores_and_migrates(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The happy path: fetch the dump, restore it, and bring Central back."""
+    downloads: list[tuple[str, str]] = []
+
+    class FakeS3:
+        def download_fileobj(self, bucket: str, key: str, fileobj: Any) -> None:
+            downloads.append((bucket, key))
+            fileobj.write(b"PGDMP fake dump")
+
+    monkeypatch.setattr(OdkCentralCharm, "_s3_client", lambda self, config: FakeS3())
+    state_in = testing.State(
+        containers={_restore_service(), nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    ctx.run(ctx.on.action("restore", params={"source": "nightly/20260101T000000Z"}), state_in)
+
+    assert ctx.action_results is not None
+    assert ctx.action_results["result"] == "database restored"
+    assert downloads == [("odk-central", "nightly/20260101T000000Z/central.dump")]
+    # Blobs in the bucket are not part of a database restore.
+    assert "were not part of this restore" in ctx.action_results["note"]
+
+
+def test_restore_reports_a_download_failure(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing or unreadable object fails the action with the key it wanted."""
+
+    class FakeS3:
+        def download_fileobj(self, bucket: str, key: str, fileobj: Any) -> None:
+            raise RuntimeError("NoSuchKey")
+
+    monkeypatch.setattr(OdkCentralCharm, "_s3_client", lambda self, config: FakeS3())
+    state_in = testing.State(
+        containers={_restore_service(), nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("restore", params={"source": "missing"}), state_in)
+
+    assert "NoSuchKey" in excinfo.value.message
+    assert "missing/central.dump" in excinfo.value.message
+
+
+def test_restore_explains_the_postgres_version_mismatch(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same client-too-old problem applies in both directions."""
+
+    class FakeS3:
+        def download_fileobj(self, bucket: str, key: str, fileobj: Any) -> None:
+            fileobj.write(b"PGDMP fake dump")
+
+    monkeypatch.setattr(OdkCentralCharm, "_s3_client", lambda self, config: FakeS3())
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={
+            migrations_exec(),
+            empty_database_exec(),
+            pg_restore_exec(
+                return_code=1,
+                stdout="pg_restore: error: aborting because of server version mismatch",
+            ),
+        },
+    )
+    state_in = testing.State(
+        containers={service, nginx}, relations={postgresql, s3_relation()}, leader=True
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("restore", params={"source": "nightly"}), state_in)
+
+    assert "14/stable" in excinfo.value.message
+
+
+def test_restore_needs_a_database_relation(
+    ctx: testing.Context[OdkCentralCharm],
+    cli_service: testing.Container,
+    nginx: testing.Container,
+) -> None:
+    """There is nothing to restore into."""
+    state_in = testing.State(
+        containers={cli_service, nginx}, relations={s3_relation()}, leader=True
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("restore", params={"source": "nightly"}), state_in)
+
+    assert "postgresql" in excinfo.value.message
+
+
+def test_backup_needs_a_database_relation(
+    ctx: testing.Context[OdkCentralCharm],
+    cli_service: testing.Container,
+    nginx: testing.Container,
+) -> None:
+    """There is nothing to back up."""
+    state_in = testing.State(
+        containers={cli_service, nginx}, relations={s3_relation()}, leader=True
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("backup", params={"destination": "nightly"}), state_in)
+
+    assert "postgresql" in excinfo.value.message
+
+
+def test_actions_need_the_service_container(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """Every action that drives the workload fails cleanly without Pebble."""
+    state_in = testing.State(
+        containers={testing.Container("service", can_connect=False), nginx},
+        relations={postgresql},
+        leader=True,
+    )
+
+    for action, params in (
+        ("run-migrations", {}),
+        ("purge-deleted", {}),
+        ("upload-pending-blobs", {}),
+        ("promote-user", {"email": "a@example.com"}),
+    ):
+        with pytest.raises(testing.ActionFailed) as excinfo:
+            ctx.run(ctx.on.action(action, params=params), state_in)
+        assert "not ready" in excinfo.value.message, action
+
+
+def test_purge_reports_a_failure(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """A purge that fails is reported, not swallowed."""
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={migrations_exec(), purge_exec(return_code=1, stdout="deadlock detected")},
+    )
+    state_in = testing.State(containers={service, nginx}, relations={postgresql}, leader=True)
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("purge-deleted"), state_in)
+
+    assert "deadlock detected" in excinfo.value.message
+
+
+def test_upload_pending_blobs_reports_a_failure(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed upload run fails the action with the workload's reason."""
+    monkeypatch.setattr(OdkCentralCharm, "_pending_blob_count", lambda self, container: 3)
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={
+            migrations_exec(),
+            testing.Exec(
+                command_prefix=["node", "./lib/bin/s3.js", "upload-pending"],
+                return_code=1,
+                stdout="AccessDenied",
+            ),
+        },
+    )
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("upload-pending-blobs"), state_in)
+
+    assert "AccessDenied" in excinfo.value.message

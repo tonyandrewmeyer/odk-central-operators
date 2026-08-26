@@ -40,6 +40,17 @@ uv run pytest charms/enketo-k8s/tests/unit
 uv run pytest charms/pyxform-k8s/tests/unit
 ```
 
+Run them one charm at a time. All three have a `src/charm.py`, so a single
+invocation over the repository sees three modules named `charm` and refuses to
+collect anything.
+
+CI requires 95% branch coverage of each `src/charm.py`:
+
+```bash
+uv run pytest charms/<name>/tests/unit \
+  --cov=charm --cov-branch --cov-report=term-missing --cov-fail-under=95
+```
+
 Integration tests use [`jubilant`](https://github.com/canonical/jubilant) and
 exercise the whole group at once, because the interesting failures in this
 charm group only happen across charm boundaries.

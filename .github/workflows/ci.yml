@@ -42,8 +42,13 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-packages --frozen
+      # Each charm is run on its own: all three have a src/charm.py, and a
+      # single invocation over the repository sees three modules named `charm`
+      # and refuses to collect.
       - name: Run unit tests
-        run: uv run pytest charms/${{ matrix.charm }}/tests/unit -v
+        run: >-
+          uv run pytest charms/${{ matrix.charm }}/tests/unit -v
+          --cov=charm --cov-branch --cov-report=term-missing --cov-fail-under=95
 
   docs-check:
     name: Docs match charmcraft.yaml
