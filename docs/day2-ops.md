@@ -103,3 +103,79 @@ juju run enketo-k8s/0 flush-cache
 `flush-cache` only ever touches the cache instance. It refuses to run when the
 cache and durable endpoints resolve to the same place, and when the cache is
 relation-backed it tells you to use the providing charm instead.
+
+## Backup and restore
+
+```bash
+juju run odk-central-k8s/0 backup destination=nightly
+juju run odk-central-k8s/0 restore source=nightly/20260826T083747Z force=true
+```
+
+`backup` takes a custom-format `pg_dump` of the Central database inside the
+service container and uploads it to `<destination>/<timestamp>/central.dump` in
+the bucket from the `s3` relation. `restore` reverses that: it stops the API and
+nginx, downloads the dump, restores it, re-runs migrations and brings Central
+back up.
+
+`restore` refuses to run against a database that already has tables unless you
+pass `force=true`, and it refuses if it cannot check — a check that fails is not
+evidence that the database is empty.
+
+### Deploy PostgreSQL 14, not 16
+
+ODK Central targets PostgreSQL 14: upstream's compose file runs `postgres14`,
+and the published `central-service` image ships `postgresql-client-14`.
+
+`pg_dump` refuses to dump a server newer than itself. On
+`postgresql-k8s --channel 16/stable` the application runs perfectly well — the
+Node client does not care about the server version — but every `pg_dump`-based
+feature stops working:
+
+```
+pg_dump: error: server version: 16.14; pg_dump version: 14.24
+pg_dump: error: aborting because of server version mismatch
+```
+
+That takes out this charm's `backup` and `restore` actions **and ODK Central's
+own `/v1/backup` endpoint**, which shells out to the same binary. The charm
+detects this specific failure and says so rather than reporting a raw
+`pg_dump` error.
+
+So: **deploy `postgresql-k8s --channel 14/stable`.** If you are already on a
+16-series database, take backups with the database charm instead:
+
+```bash
+juju run postgresql-k8s/leader create-backup
+```
+
+### What is not in a backup
+
+The dump is the database only.
+
+- **Submission attachments already moved to S3 are not included.** Once the
+  `s3` relation exists, new blobs go to the bucket and the dump no longer
+  contains them. The bucket needs its own versioning or lifecycle policy.
+- Blobs still in PostgreSQL — because `upload-pending-blobs` has not moved them
+  yet — *are* in the dump. A deployment can sit in this partially-migrated state
+  indefinitely, so which of the two applies depends on when you look.
+- `redis-main` is not included. See above: it holds Enketo's in-flight form
+  state, and losing it loses submissions that respondents have started but not
+  sent.
+
+A complete disaster-recovery posture for this group is therefore three things:
+a Juju model backup, the database dump, and versioning on the S3 bucket.
+
+### Restoring into a charm-managed database
+
+`pg_restore --clean` emits a `DROP` for every object in the archive, extensions
+included. The database charm installs extensions such as `pgaudit` as a
+superuser, and the relation user does not own them, so a naive restore fails on
+an object the application never created:
+
+```
+pg_restore: error: could not execute query: ERROR:  must be owner of extension pgaudit
+```
+
+The charm filters every `EXTENSION` entry out of the archive's table of
+contents before restoring, which drops both the `DROP` and the `CREATE` and
+leaves the extensions already in the database untouched.

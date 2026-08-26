@@ -6,16 +6,20 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import logging
 import re
 import secrets
 import string
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import boto3
 import ops
 import requests
 from charms.data_platform_libs.v0.data_interfaces import (
@@ -85,6 +89,40 @@ SECRET_LABEL_ADMIN_PASSWORD = "odk-admin-password"
 GENERATED_PASSWORD_LENGTH = 24
 
 ACTION_TIMEOUT = 600
+BACKUP_TIMEOUT = 3600
+
+# Where a dump lives inside the service container while it is being moved.
+DUMP_PATH = "/tmp/central-backup.dump"  # noqa: S108 - inside the workload container
+
+# The published central-service image ships postgresql-client-14, matching the
+# PostgreSQL that upstream's compose deployment runs. pg_dump refuses to dump a
+# server newer than itself, so a 16-series database cannot be backed up with
+# the tooling in the image -- and neither can Central's own /v1/backup endpoint,
+# which shells out to the same binary.
+# pg_restore --clean emits a DROP for every object in the archive, extensions
+# included, and the relation user does not own the extensions that the database
+# charm installs as superuser -- pgaudit, for one. Restoring the whole archive
+# therefore fails on an object the application never created and does not need
+# to recreate. The archive's table of contents is filtered to drop every
+# EXTENSION entry, which removes both its DROP and its CREATE, and the
+# extensions already present in the database are left exactly as they are.
+RESTORE_SCRIPT = """set -eu
+pg_restore --list "$DUMP" > /tmp/central-restore.toc
+grep -v ' EXTENSION ' /tmp/central-restore.toc > /tmp/central-restore.filtered
+# pg_restore needs an explicit --dbname even when PGDATABASE is set.
+pg_restore --clean --if-exists --no-owner --no-privileges \\
+    --dbname "$PGDATABASE" --use-list /tmp/central-restore.filtered "$DUMP"
+rm -f /tmp/central-restore.toc /tmp/central-restore.filtered
+"""
+
+VERSION_MISMATCH_HINT = (
+    "The pg_dump in the ODK Central image cannot dump this server: it is older "
+    "than the database. ODK Central targets PostgreSQL 14, so deploy "
+    "`postgresql-k8s --channel 14/stable` if you want this action to work. On a "
+    "16-series database, take backups with the database charm instead: "
+    "`juju run postgresql-k8s/leader create-backup`. Note that ODK Central's own "
+    "/v1/backup endpoint is unavailable for the same reason."
+)
 
 # /v1/config/public is the only unauthenticated endpoint that also touches the
 # database, so it proves the API and its database are both working. There is no
@@ -117,6 +155,15 @@ SECRET_ALPHABET = string.ascii_letters + string.digits
 
 
 _STACK_FRAME = re.compile(r"^\s+at\s")
+
+
+def stop_if_running(container: ops.Container, service_name: str) -> None:
+    """Stop a Pebble service, tolerating one that was never started."""
+    if not container.can_connect():
+        return
+    service = container.get_services().get(service_name)
+    if service is not None and service.is_running():
+        container.stop(service_name)
 
 
 def _tail(output: str, lines: int = 50) -> str:
@@ -222,6 +269,8 @@ class OdkCentralCharm(ops.CharmBase):
             ("run_migrations", self._on_run_migrations_action),
             ("upload_pending_blobs", self._on_upload_pending_blobs_action),
             ("purge_deleted", self._on_purge_deleted_action),
+            ("backup", self._on_backup_action),
+            ("restore", self._on_restore_action),
         ):
             framework.observe(getattr(self.on, f"{action}_action"), handler)
 
@@ -1025,6 +1074,185 @@ class OdkCentralCharm(ops.CharmBase):
             return
 
         event.set_results({"result": "purge completed", "output": _tail(output)})
+
+    def _backup_environment(self, database: dict[str, Any]) -> dict[str, str]:
+        """Return the libpq environment for pg_dump and pg_restore."""
+        return {
+            "PGHOST": str(database["host"]),
+            "PGPORT": str(database["port"]),
+            "PGUSER": str(database["user"]),
+            "PGPASSWORD": str(database["password"]),
+            "PGDATABASE": str(database["database"]),
+        }
+
+    def _s3_client(self, config: dict[str, str]) -> Any:
+        """Return a boto3 S3 client for the related blob store."""
+        return boto3.client(
+            "s3",
+            endpoint_url=config["server"],
+            aws_access_key_id=config["accessKey"],
+            aws_secret_access_key=config["secretKey"],
+        )
+
+    def _on_backup_action(self, event: ops.ActionEvent) -> None:
+        """Dump the Central database to the S3 blob store."""
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        s3 = self._s3_config()
+        if not s3:
+            event.fail(
+                "There is no complete s3 relation to write the backup to. Relate "
+                "s3-integrator and try again."
+            )
+            return
+
+        database = self._database_config()
+        if database is None:
+            event.fail("There is no complete postgresql relation to back up.")
+            return
+
+        self.unit.status = ops.MaintenanceStatus("taking a database backup")
+        try:
+            try:
+                process = container.exec(
+                    ["pg_dump", "--format=custom", "--file", DUMP_PATH],
+                    environment=self._backup_environment(database),
+                    timeout=BACKUP_TIMEOUT,
+                    combine_stderr=True,
+                )
+                process.wait_output()
+            except ops.pebble.ExecError as exc:
+                output = str(exc.stdout or "")
+                if "server version mismatch" in output:
+                    event.fail(VERSION_MISMATCH_HINT)
+                else:
+                    event.fail(f"pg_dump failed: {_reason(exc)}")
+                return
+
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            key = f"{str(event.params['destination']).strip('/')}/{timestamp}/central.dump"
+
+            try:
+                with container.pull(DUMP_PATH, encoding=None) as dump:
+                    payload = dump.read()
+            except ops.pebble.PathError:
+                event.fail(
+                    "pg_dump reported success but produced no dump file. Check the "
+                    "service container's logs."
+                )
+                return
+            self._s3_client(s3).upload_fileobj(io.BytesIO(payload), s3["bucketName"], key)
+
+            event.set_results(
+                {
+                    "path": f"s3://{s3['bucketName']}/{key}",
+                    "bytes": len(payload),
+                    "note": (
+                        "This is the database only. Submission attachments already "
+                        "moved to the blob store are NOT in this dump, so the "
+                        "bucket needs its own versioning or lifecycle policy to be "
+                        "recoverable."
+                    ),
+                }
+            )
+        finally:
+            with contextlib.suppress(ops.pebble.PathError):
+                container.remove_path(DUMP_PATH)
+            self._reconcile()
+
+    def _on_restore_action(self, event: ops.ActionEvent) -> None:
+        """Restore the Central database from a backup snapshot."""
+        container = self._service_container(event)
+        if container is None:
+            return
+
+        s3 = self._s3_config()
+        if not s3:
+            event.fail("There is no complete s3 relation to read the backup from.")
+            return
+
+        database = self._database_config()
+        if database is None:
+            event.fail("There is no complete postgresql relation to restore into.")
+            return
+
+        environment = self._backup_environment(database)
+        if not event.params.get("force") and self._database_has_tables(container, environment):
+            event.fail(
+                "The target database is not empty. Restoring would overwrite it, so "
+                "pass force=true if that is what you intend."
+            )
+            return
+
+        nginx = self.unit.get_container(NGINX_CONTAINER)
+        self.unit.status = ops.MaintenanceStatus("restoring the database")
+        try:
+            # Central must not be serving while its schema is replaced.
+            stop_if_running(nginx, NGINX_CONTAINER)
+            stop_if_running(container, SERVICE_CONTAINER)
+
+            key = f"{str(event.params['source']).strip('/')}/central.dump"
+            payload = io.BytesIO()
+            try:
+                self._s3_client(s3).download_fileobj(s3["bucketName"], key, payload)
+            except Exception as exc:  # noqa: BLE001 - boto3 raises many types
+                event.fail(f"Could not download s3://{s3['bucketName']}/{key}: {exc}")
+                return
+
+            container.push(DUMP_PATH, payload.getvalue(), make_dirs=True)
+
+            try:
+                process = container.exec(
+                    ["sh", "-c", RESTORE_SCRIPT],
+                    environment={**environment, "DUMP": DUMP_PATH},
+                    timeout=BACKUP_TIMEOUT,
+                    combine_stderr=True,
+                )
+                output, _ = process.wait_output()
+            except ops.pebble.ExecError as exc:
+                text = str(exc.stdout or "")
+                if "server version mismatch" in text:
+                    event.fail(VERSION_MISMATCH_HINT)
+                else:
+                    event.fail(f"pg_restore failed: {_reason(exc)}")
+                return
+
+            event.set_results(
+                {
+                    "result": "database restored",
+                    "output": _tail(output),
+                    "note": (
+                        "Submission attachments in the blob store were not part of this restore."
+                    ),
+                }
+            )
+        finally:
+            with contextlib.suppress(ops.pebble.PathError):
+                container.remove_path(DUMP_PATH)
+            # Bring everything back up, migrations included.
+            self._reconcile(migrate=True)
+
+    def _database_has_tables(self, container: ops.Container, environment: dict[str, str]) -> bool:
+        """Return whether the target database already has application tables."""
+        try:
+            process = container.exec(
+                [
+                    "psql",
+                    "-tAc",
+                    "select count(*) from information_schema.tables where table_schema = 'public'",
+                ],
+                environment=environment,
+                timeout=60,
+            )
+            output, _ = process.wait_output()
+        except ops.pebble.ExecError:
+            # If the check itself cannot run, assume the database is populated:
+            # refusing is the safe direction.
+            return True
+        digits = "".join(c for c in output if c.isdigit())
+        return bool(digits) and int(digits) > 0
 
     def _pending_blob_count(self, container: ops.Container) -> int | None:
         """Return how many blobs are still waiting to move to S3, if knowable."""

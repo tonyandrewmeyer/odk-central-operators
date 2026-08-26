@@ -104,6 +104,12 @@ requires:
     description: |
       Central's application database, and the only durable home for projects,
       forms, users and submissions. Central cannot start without it.
+
+      Deploy `postgresql-k8s --channel 14/stable`. ODK Central targets
+      PostgreSQL 14 and its image ships postgresql-client-14, which refuses to
+      dump a newer server: on a 16-series database the charm's backup and
+      restore actions and ODK Central's own /v1/backup endpoint all stop
+      working, even though the application itself runs fine.
   xlsform:
     interface: odk-xlsform
     limit: 1

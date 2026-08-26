@@ -41,7 +41,7 @@ juju deploy odk-central-k8s --channel latest/edge --trust
 juju deploy enketo-k8s      --channel latest/edge
 juju deploy pyxform-k8s     --channel latest/edge
 
-juju deploy postgresql-k8s --channel 16/stable --trust
+juju deploy postgresql-k8s --channel 14/stable --trust
 juju deploy traefik-k8s    --channel latest/stable --trust
 
 juju integrate odk-central-k8s postgresql-k8s

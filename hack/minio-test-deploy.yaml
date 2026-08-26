@@ -1,0 +1,83 @@
+# A single-replica MinIO for exercising the s3 relation in a test model.
+#
+# This is NOT a production deployment: the credentials are fixed, there is no
+# TLS, and storage is an emptyDir, so everything is lost when the pod restarts.
+# It exists so that the S3 blob store path and the backup and restore actions
+# can be tested end to end without an external object store.
+#
+#   sudo k8s kubectl apply -f hack/minio-test-deploy.yaml
+#   juju config s3-integrator endpoint=http://minio.minio.svc:9000 \
+#     bucket=odk-central region=us-east-1 path=/
+#   juju run s3-integrator/leader sync-s3-credentials \
+#     access-key=odkcentral secret-key=odkcentralsecret
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: minio
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: odkcentral
+  MINIO_ROOT_PASSWORD: odkcentralsecret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef:
+                name: minio-credentials
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001

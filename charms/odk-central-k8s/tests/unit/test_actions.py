@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 from charm import SECRET_LABEL_ADMIN_PASSWORD, OdkCentralCharm
@@ -533,3 +534,189 @@ def test_a_node_stack_trace_is_reduced_to_its_error_line(
 
     assert "Could not find the resource" in excinfo.value.message
     assert "node:internal/modules" not in excinfo.value.message
+
+
+# backup and restore
+
+
+def s3_relation() -> testing.Relation:
+    """Return a settled s3 relation."""
+    return testing.Relation(
+        "s3",
+        remote_app_name="s3-integrator",
+        remote_app_data={
+            "access-key": "AKIA",
+            "secret-key": "shhh",
+            "bucket": "odk-central",
+            "endpoint": "http://minio.default.svc:9000",
+        },
+    )
+
+
+def pg_dump_exec(return_code: int = 0, stdout: str = "") -> testing.Exec:
+    """Return a fake exec result for pg_dump."""
+    return testing.Exec(command_prefix=["pg_dump"], return_code=return_code, stdout=stdout)
+
+
+def test_backup_needs_an_s3_relation(
+    ctx: testing.Context[OdkCentralCharm],
+    cli_service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """There is nowhere to put a backup without one."""
+    state_in = testing.State(containers={cli_service, nginx}, relations={postgresql}, leader=True)
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("backup", params={"destination": "nightly"}), state_in)
+
+    assert "s3-integrator" in excinfo.value.message
+
+
+def test_backup_explains_the_postgres_version_mismatch(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """The image ships postgresql-client-14 and cannot dump a newer server.
+
+    This is not hypothetical: it is what happens against
+    `postgresql-k8s --channel 16/stable`, and it breaks ODK Central's own
+    /v1/backup endpoint for the same reason.
+    """
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={
+            migrations_exec(),
+            pg_dump_exec(
+                return_code=1,
+                stdout=(
+                    "pg_dump: error: server version: 16.14; pg_dump version: 14.24\n"
+                    "pg_dump: error: aborting because of server version mismatch"
+                ),
+            ),
+        },
+    )
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("backup", params={"destination": "nightly"}), state_in)
+
+    assert "14/stable" in excinfo.value.message
+    assert "create-backup" in excinfo.value.message
+
+
+def test_backup_uploads_and_says_what_is_not_included(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Blobs already in S3 are outside the dump, and operators must know."""
+    uploads: list[tuple[str, str]] = []
+
+    class FakeS3:
+        def upload_fileobj(self, fileobj: object, bucket: str, key: str) -> None:
+            uploads.append((bucket, key))
+
+    monkeypatch.setattr(OdkCentralCharm, "_s3_client", lambda self, config: FakeS3())
+    # pg_dump writes the file; the fake exec cannot, so it is placed here.
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    (tmp_dir / "central-backup.dump").write_bytes(b"PGDMP fake dump")
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={migrations_exec(), pg_dump_exec()},
+        mounts={"tmp": testing.Mount(location="/tmp", source=tmp_dir)},
+    )
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    ctx.run(ctx.on.action("backup", params={"destination": "nightly/"}), state_in)
+
+    assert ctx.action_results is not None
+    assert uploads and uploads[0][0] == "odk-central"
+    assert uploads[0][1].startswith("nightly/")
+    assert uploads[0][1].endswith("/central.dump")
+    assert "NOT in this dump" in ctx.action_results["note"]
+
+
+def test_restore_refuses_a_populated_database_without_force(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """Overwriting live data has to be deliberate."""
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={
+            migrations_exec(),
+            testing.Exec(command_prefix=["psql"], return_code=0, stdout="42\n"),
+        },
+    )
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("restore", params={"source": "nightly/20260101T000000Z"}), state_in)
+
+    assert "force=true" in excinfo.value.message
+
+
+def test_restore_refuses_when_it_cannot_check_the_database(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """A check that cannot run must not be read as "the database is empty"."""
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={
+            migrations_exec(),
+            testing.Exec(command_prefix=["psql"], return_code=2, stderr="could not connect"),
+        },
+    )
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    with pytest.raises(testing.ActionFailed):
+        ctx.run(ctx.on.action("restore", params={"source": "nightly/x"}), state_in)
+
+
+def test_backup_fails_cleanly_if_the_dump_file_is_missing(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """A pg_dump that exits 0 without writing anything must not raise."""
+    service = testing.Container(
+        "service", can_connect=True, execs={migrations_exec(), pg_dump_exec()}
+    )
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql, s3_relation()},
+        leader=True,
+    )
+
+    with pytest.raises(testing.ActionFailed) as excinfo:
+        ctx.run(ctx.on.action("backup", params={"destination": "nightly"}), state_in)
+
+    assert "no dump file" in excinfo.value.message

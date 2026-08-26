@@ -19,6 +19,7 @@ dev = [
     "ruff>=0.8",
     "pre-commit>=4.0",
     "types-requests",
+    "boto3-stubs[s3]",
     "types-PyYAML",
     "types-openpyxl",
     "PyYAML>=6.0",
