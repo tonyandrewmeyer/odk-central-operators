@@ -222,6 +222,7 @@ FIELD_ENCRYPTION_KEY_ID = "encryption-key-secret-id"
 FIELD_LESS_SECURE_KEY_ID = "less-secure-key-secret-id"
 FIELD_BASE_URL = "base-url"
 FIELD_SUPPORT_EMAIL = "support-email"
+FIELD_SECRETS_REVISION = "secrets-revision"
 FIELD_ENKETO_URL = "enketo-url"
 
 SECRET_ID_FIELDS = {
@@ -260,6 +261,7 @@ class OdkEnketoProvider(ops.Object):
 
         for relation in self._charm.model.relations.get(self._relation_name, ()):
             databag = {FIELD_BASE_URL: base_url, FIELD_SUPPORT_EMAIL: support_email}
+            revisions: list[str] = []
             for label, field in SECRET_ID_FIELDS.items():
                 secret = self._charm.model.get_secret(label=label)
                 # Granting is idempotent, and has to happen before the requirer
@@ -268,6 +270,16 @@ class OdkEnketoProvider(ops.Object):
                 if secret.id is None:  # pragma: no cover - defensive
                     raise RuntimeError(f"secret {label} has no ID to publish")
                 databag[field] = secret.id
+                revisions.append(str(secret.get_info().revision))
+
+            # A rotation does not change the IDs, so without this the databag
+            # would be byte-identical before and after one and the requirer
+            # would get no relation-changed at all. Relying on secret-changed
+            # alone is not enough: it is one delivery, and if the requirer is
+            # not in a position to act on it the rotation is simply missed.
+            # The revision numbers say "these are different values" without
+            # disclosing anything about them.
+            databag[FIELD_SECRETS_REVISION] = ".".join(revisions)
             relation.data[self._charm.app].update(databag)
 
     @property
@@ -373,12 +385,16 @@ class OdkEnketoRequirer(ops.Object):
         self.on.odk_enketo_gone.emit()
 
     def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
-        """Re-read the secrets when Central rotates them."""
+        """Re-read the secrets when Central rotates them.
+
+        Every secret-changed is acted on rather than only those whose ID
+        matches one in the databag. Secret IDs have more than one textual form,
+        so comparing them as strings is a quiet way to miss a rotation, and
+        re-reading is cheap and idempotent: if nothing this charm cares about
+        changed, the reconcile that follows is a no-op.
+        """
         relation = self._charm.model.get_relation(self._relation_name)
         if relation is None or relation.app is None:
-            return
-        databag = relation.data[relation.app]
-        if event.secret.id not in {databag.get(field) for field in SECRET_ID_FIELDS.values()}:
             return
         if self._read(relation) is None:
             self.on.odk_enketo_gone.emit()

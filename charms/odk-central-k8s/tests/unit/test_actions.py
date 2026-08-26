@@ -767,3 +767,37 @@ def test_rotation_renders_with_the_values_it_just_generated(
     passed = captured.get("shared_secrets")
     assert passed is not None, "the reconcile was left to re-read the secrets"
     assert passed.api_key == rotated  # type: ignore[union-attr]
+
+
+def test_rotation_changes_the_relation_databag(
+    ctx: testing.Context[OdkCentralCharm],
+    cli_service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    shared_secrets: set[testing.Secret],
+) -> None:
+    """Rotating must be visible to Enketo as a relation change.
+
+    A rotation does not change the secret IDs, so a databag holding only IDs is
+    byte-identical before and after one and Enketo gets no relation-changed at
+    all. That leaves secret-changed as the single delivery carrying the
+    rotation, and if it is missed the two ends disagree permanently: Central
+    presents the new key to an Enketo still holding the old one, every request
+    is rejected, and no new form gets an Enketo id -- while both applications
+    go on reporting themselves perfectly healthy.
+    """
+    enketo = testing.Relation("odk-enketo", remote_app_name="enketo-k8s")
+    state = testing.State(
+        containers={cli_service, nginx},
+        relations={postgresql, enketo},
+        secrets=shared_secrets,
+        leader=True,
+    )
+
+    settled = ctx.run(ctx.on.config_changed(), state)
+    before = dict(settled.get_relation(enketo.id).local_app_data)
+
+    rotated = ctx.run(ctx.on.action("rotate-enketo-secrets"), settled)
+    after = dict(rotated.get_relation(enketo.id).local_app_data)
+
+    assert after != before, "Enketo has no way to notice this rotation"
