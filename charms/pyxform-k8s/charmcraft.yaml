@@ -1,0 +1,111 @@
+# yamllint disable rule:line-length
+name: pyxform-k8s
+type: charm
+title: pyxform for ODK Central
+summary: Converts XLSForm spreadsheets into XForms for ODK Central.
+
+description: |
+  pyxform turns an XLSForm spreadsheet into the XForm XML that ODK clients
+  actually fill in. It is the first step in publishing an ODK form.
+
+  This charm runs the upstream `pyxform-http` service and advertises its
+  address to ODK Central over the `odk-xlsform` interface. The service is
+  stateless: it holds no data, needs no database and no storage, and scales
+  horizontally by adding units.
+
+  It is deployed alongside `odk-central-k8s` and `enketo-k8s`, and is the only
+  member of that group that reaches active status on its own. It is reached
+  only by Central, in-cluster, and deliberately has no ingress endpoint — do
+  not expose it.
+
+  This charm is for anyone running ODK Central on Kubernetes with Juju.
+
+links:
+  documentation: https://tonyandrewmeyer.github.io/odk-central-operators/
+  issues: https://github.com/tonyandrewmeyer/odk-central-operators/issues
+  source: https://github.com/tonyandrewmeyer/odk-central-operators
+  website:
+    - https://docs.getodk.org
+    - https://github.com/XLSForm/pyxform
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: charm
+    source: .
+    charm-requirements: [requirements.txt]
+    charm-strict-dependencies: true
+
+containers:
+  pyxform:
+    resource: pyxform-image
+
+resources:
+  pyxform-image:
+    type: oci-image
+    description: |
+      The upstream pyxform HTTP conversion service. Pinned independently of the
+      ODK Central release; check `docker-compose.yml` at the Central tag you are
+      running to confirm which version it expects.
+    upstream-source: ghcr.io/getodk/pyxform-http:v4.5.0
+
+provides:
+  xlsform:
+    interface: odk-xlsform
+    description: |
+      Advertises the host and port of this conversion service to ODK Central,
+      which writes them into the `xlsform` stanza of its `config.json`.
+  metrics-endpoint:
+    interface: prometheus_scrape
+    description: Prometheus scrape target for conversion metrics.
+  grafana-dashboard:
+    interface: grafana_dashboard
+    description: Grafana dashboard covering conversion rate and latency.
+
+requires:
+  logging:
+    interface: loki_push_api
+    description: Forwards the pyxform workload log to Loki.
+
+config:
+  options:
+    workers:
+      type: int
+      default: 2
+      description: |
+        Number of HTTP worker processes. Conversion is CPU-bound, so there is
+        little benefit in setting this above the CPU limit of the container.
+    conversion-timeout:
+      type: int
+      default: 60
+      description: |
+        Seconds before an in-flight XLSForm conversion is abandoned. Large
+        forms with many translations legitimately take tens of seconds; raise
+        this if form publishing in Central times out.
+    log-level:
+      type: string
+      default: INFO
+      description: |
+        Workload log level. One of DEBUG, INFO, WARN or ERROR.
+
+actions:
+  convert:
+    description: |
+      Convert an XLSForm and return the resulting XForm. This is a diagnostic
+      for confirming the converter works and for reproducing a conversion
+      failure without going through Central; it is not a production path for
+      publishing forms.
+    params:
+      xlsform:
+        type: string
+        description: The XLSForm spreadsheet, base64-encoded.
+    required:
+      - xlsform

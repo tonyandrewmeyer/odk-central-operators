@@ -5,7 +5,11 @@ description = "Juju charm: pyxform-k8s"
 readme = "../../README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
-dependencies = ["ops[tracing]>=3.0,<4.0"]
+dependencies = [
+    "ops[tracing]>=3.0,<4.0",
+    "cosl>=0.0.53",
+    "requests>=2.32",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

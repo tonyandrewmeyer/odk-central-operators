@@ -1,0 +1,328 @@
+# yamllint disable rule:line-length
+name: odk-central-k8s
+type: charm
+title: ODK Central
+summary: The ODK Central API and web frontend.
+
+description: |
+  ODK Central is the server half of the ODK ecosystem for collecting, managing
+  and using survey and field data. Forms authored as XLSForm spreadsheets are
+  converted to XForms, filled in offline on a mobile client or in a browser,
+  and submitted back to Central, which manages projects, form versions,
+  submissions, attachments and users.
+
+  This charm runs the two halves that upstream releases and version-locks
+  together: the Node API service and the nginx reverse proxy serving the built
+  web frontend. It stores its data in a related PostgreSQL, optionally offloads
+  submission attachments to S3, sends account email through a related SMTP
+  relay, and authenticates either with passwords or with OpenID Connect.
+
+  It is the centre of a three-charm group. It generates the secrets Enketo
+  needs and distributes them over the `odk-enketo` relation, and it consumes
+  the XLSForm conversion service provided by `pyxform-k8s`. Deploy all three
+  together.
+
+  This charm is for anyone running ODK Central on Kubernetes with Juju.
+
+links:
+  documentation: https://tonyandrewmeyer.github.io/odk-central-operators/
+  issues: https://github.com/tonyandrewmeyer/odk-central-operators/issues
+  source: https://github.com/tonyandrewmeyer/odk-central-operators
+  website:
+    - https://docs.getodk.org
+    - https://github.com/getodk/central
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: charm
+    source: .
+    charm-requirements: [requirements.txt]
+    charm-strict-dependencies: true
+
+containers:
+  service:
+    resource: service-image
+  nginx:
+    resource: nginx-image
+
+resources:
+  service-image:
+    type: oci-image
+    description: |
+      The ODK Central API service. Must be the same release tag as
+      nginx-image: upstream builds and releases the two together, and the
+      frontend is baked into the nginx image at build time.
+    upstream-source: ghcr.io/getodk/central-service:v2026.2.4
+  nginx-image:
+    type: oci-image
+    description: |
+      nginx with the built ODK Central web frontend. Must be the same release
+      tag as service-image.
+    upstream-source: ghcr.io/getodk/central-nginx:v2026.2.4
+
+provides:
+  odk-enketo:
+    interface: odk-enketo
+    description: |
+      Generates the three secrets Enketo needs, grants them to the related
+      application as Juju secrets, and publishes the deployment's public base
+      URL. Receives Enketo's in-cluster URL in return. Replaces upstream's
+      one-shot `secrets` container, which has no charm equivalent because Juju
+      has no shared volume between applications.
+  metrics-endpoint:
+    interface: prometheus_scrape
+    description: Prometheus scrape target for Central's API and data metrics.
+  grafana-dashboard:
+    interface: grafana_dashboard
+    description: |
+      Grafana dashboard covering submissions per hour, API request and error
+      rate, and pending blob uploads.
+
+requires:
+  postgresql:
+    interface: postgresql_client
+    limit: 1
+    description: |
+      Central's application database, and the only durable home for projects,
+      forms, users and submissions. Central cannot start without it.
+  xlsform:
+    interface: odk-xlsform
+    limit: 1
+    description: |
+      The XLSForm conversion service provided by `pyxform-k8s`. Without it
+      Central runs, but publishing a new form fails.
+  ingress:
+    interface: ingress
+    limit: 1
+    description: |
+      Public HTTP ingress. Requests ingress for the nginx container on port 80,
+      not the API on 8383: Central's frontend and API must be same-origin.
+      TLS is terminated at the ingress, and the workload nginx is configured
+      with SSL_TYPE=upstream so that it serves plain HTTP and trusts
+      X-Forwarded-Proto.
+  s3:
+    interface: s3
+    limit: 1
+    description: |
+      Blob store for submission attachments and form media. New blobs go to S3
+      as soon as this relation exists; blobs already in PostgreSQL stay there
+      until the upload-pending-blobs action moves them.
+  smtp:
+    interface: smtp
+    limit: 1
+    description: |
+      Outbound mail relay. Central only sends on account creation, password
+      reset and project invitation, so without this relation Central still
+      reaches active status and only those operations fail.
+  oauth:
+    interface: oauth
+    limit: 1
+    description: |
+      OpenID Connect provider. Takes precedence over the oidc-* configuration
+      options when both are present. Enabling OIDC disables password
+      authentication entirely — see the oidc-enabled option.
+  tracing:
+    interface: tracing
+    limit: 1
+    description: Sends charm traces to Tempo.
+  logging:
+    interface: loki_push_api
+    description: Forwards the service and nginx workload logs to Loki.
+
+config:
+  options:
+    external-hostname:
+      type: string
+      default: ""
+      description: |
+        The public fully-qualified domain name this deployment is reached at.
+        Overrides the hostname supplied by the ingress relation when set.
+
+        ODK Central will not work with a bare IP address: the frontend bakes
+        the origin into its client config, and Enketo's linked-server URL must
+        match it.
+    sysadmin-email:
+      type: string
+      default: ""
+      description: |
+        Address shown to users as the system contact, and forwarded to Enketo
+        as its support address. This is not the administrator account — that is
+        created by the create-admin action from a Juju secret.
+    email-from:
+      type: string
+      default: ""
+      description: |
+        Envelope From address for outbound mail. Defaults to
+        no-reply@<external-hostname> when empty.
+    session-lifetime:
+      type: int
+      default: 86400
+      description: Web session lifetime, in seconds.
+    db-pool-size:
+      type: int
+      default: 10
+      description: |
+        Maximum PostgreSQL connections per worker. Central runs several
+        workers, so the total connection count is a multiple of this; check it
+        against the database's own connection limit before raising it.
+    log-level:
+      type: string
+      default: INFO
+      description: |
+        Workload log level. One of DEBUG, INFO, WARN or ERROR.
+    oidc-enabled:
+      type: boolean
+      default: false
+      description: |
+        Enable OpenID Connect authentication.
+
+        This is mutually exclusive with password authentication: with OIDC
+        enabled, HTTP Basic auth and POST /v1/session stop working entirely,
+        and the create-admin, promote-user and reset-password actions refuse to
+        run. Turning this on for a running deployment locks out every existing
+        password user, so in practice it is a one-way door.
+    oidc-issuer-url:
+      type: string
+      default: ""
+      description: |
+        OIDC issuer URL. Ignored when the oauth relation is present, which
+        supplies it.
+    oidc-client-id:
+      type: string
+      default: ""
+      description: |
+        OIDC client ID. This is a public value, not a credential. Ignored when
+        the oauth relation is present.
+    oidc-client-secret:
+      type: secret
+      description: |
+        A Juju user secret holding the OIDC client secret under the key
+        "client-secret". Only needed when oidc-enabled is true and there is no
+        oauth relation to supply it.
+    admin-email-secret:
+      type: secret
+      description: |
+        A Juju user secret holding the initial administrator's email address
+        under the key "email". Consumed by the create-admin action. This is a
+        secret rather than a config option so that the address does not appear
+        in `juju config`.
+    s3-bucket-name:
+      type: string
+      default: ""
+      description: |
+        Override the bucket name supplied by the s3 relation. Leave empty to
+        use whatever the relation provides.
+    s3-upload-interval-minutes:
+      type: int
+      default: 15
+      description: |
+        How often the charm moves submission attachments still held in
+        PostgreSQL to the S3 blob store. Has no effect without an s3 relation.
+    error-reporting-dsn:
+      type: string
+      default: ""
+      description: |
+        Your own Sentry DSN for workload error reporting.
+
+        Empty — the default — blanks every Sentry value and removes the
+        frontend's CSP report endpoint. This matters: upstream's shipped
+        compose defaults contain the ODK project's own Sentry organisation and
+        project key, so a deployment that inherits them reports its errors to
+        ODK's telemetry. This charm never inherits them.
+    frontend-analytics-enabled:
+      type: boolean
+      default: false
+      description: |
+        Whether Central offers administrators the upstream usage-reporting
+        prompt. This is opt-in: enabling it only makes the prompt available,
+        and an administrator still has to agree.
+
+actions:
+  create-admin:
+    description: |
+      Create the initial web user from the admin-email-secret Juju secret and
+      promote it to administrator. The generated password is returned once and
+      cannot be retrieved afterwards. Fails when oidc-enabled is true, because
+      a password would be meaningless.
+  promote-user:
+    description: Grant an existing user the administrator role.
+    params:
+      email:
+        type: string
+        description: Address of the user to promote.
+    required:
+      - email
+  reset-password:
+    description: |
+      Reset a user's password and return the new value once. Fails when
+      oidc-enabled is true.
+    params:
+      email:
+        type: string
+        description: Address of the user.
+    required:
+      - email
+  rotate-enketo-secrets:
+    description: |
+      Regenerate all three Enketo shared secrets, republish them over the
+      odk-enketo relation, and restart both workloads.
+
+      Every in-progress web form session is invalidated: respondents part-way
+      through a form will have to start again. Rotation must reach Enketo as
+      well as Central — a partial rotation leaves every web form returning 403.
+  run-migrations:
+    description: |
+      Run database migrations manually and report the exit code and recent log
+      output. Migrations normally run automatically on refresh; use this after
+      a failed refresh, or to re-run them once the cause has been fixed.
+  upload-pending-blobs:
+    description: |
+      Upload submission attachments still held in PostgreSQL to the S3 blob
+      store, and report how many moved. A no-op with a clear message when there
+      is no s3 relation.
+  purge-deleted:
+    description: |
+      Permanently remove soft-deleted forms and submissions. This is not
+      reversible.
+    params:
+      force:
+        type: boolean
+        default: false
+        description: |
+          Also purge items still inside the retention window, which would
+          otherwise be kept for later undeletion.
+  backup:
+    description: |
+      Dump the Central database to the S3 blob store with pg_dump. Blobs
+      already offloaded to S3 are not included in the dump — the bucket needs
+      its own versioning or lifecycle policy.
+    params:
+      destination:
+        type: string
+        description: S3 path prefix to write the backup under.
+    required:
+      - destination
+  restore:
+    description: |
+      Restore the Central database from a backup snapshot. Central is stopped
+      for the duration. Refuses to run against a non-empty database unless
+      force is set.
+    params:
+      source:
+        type: string
+        description: S3 path prefix of the backup to restore.
+      force:
+        type: boolean
+        default: false
+        description: Restore even though the target database is not empty.
+    required:
+      - source

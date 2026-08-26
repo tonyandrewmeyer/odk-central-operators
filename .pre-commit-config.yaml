@@ -23,14 +23,6 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2
-    hooks:
-      - id: mypy
-        args: [--strict, --ignore-missing-imports]
-        additional_dependencies: ["ops>=3.0,<4.0", "types-requests", "types-PyYAML"]
-        exclude: '^(tests/|charms/[^/]+/tests/|hack/)'
-
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.37.1
     hooks:
@@ -47,3 +39,33 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy --strict (per charm)
+        entry: uv run python scripts/typecheck.py
+        language: system
+        pass_filenames: false
+        types_or: [python, toml]
+
+      - id: sync-libs
+        name: Charm library copies match lib/
+        entry: uv run python scripts/sync-libs.py
+        language: system
+        pass_filenames: false
+        files: '^(lib/|charms/[^/]+/lib/charms/(odk_central_k8s|pyxform_k8s)/)'
+
+      - id: export-requirements
+        name: Charm requirements match uv.lock
+        entry: uv run python scripts/export-requirements.py
+        language: system
+        pass_filenames: false
+        files: '^(uv\.lock|pyproject\.toml|charms/[^/]+/(pyproject\.toml|requirements\.txt))$'
+
+      - id: check-docs
+        name: Config docs match charmcraft.yaml
+        entry: uv run python scripts/check-docs.py
+        language: system
+        pass_filenames: false
+        files: '^(charms/[^/]+/charmcraft\.yaml|docs/configuration\.md|scripts/check-docs\.py)$'

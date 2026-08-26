@@ -5,7 +5,15 @@ description = "Juju charm: odk-central-k8s"
 readme = "../../README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
-dependencies = ["ops[tracing]>=3.0,<4.0"]
+dependencies = [
+    "ops[tracing]>=3.0,<4.0",
+    "cosl>=0.0.53",
+    "cryptography>=43.0.0",
+    "email-validator>=2",
+    "jsonschema",
+    "pydantic>=2,<3",
+    "requests>=2.32",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

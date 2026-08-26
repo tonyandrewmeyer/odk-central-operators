@@ -1,0 +1,181 @@
+# yamllint disable rule:line-length
+name: enketo-k8s
+type: charm
+title: Enketo for ODK Central
+summary: Renders ODK XForms as offline-capable web forms.
+
+description: |
+  Enketo renders ODK XForms as web forms that can be filled in from a browser,
+  including offline. It is what a respondent sees when they open an ODK Central
+  public link, and what an administrator sees when previewing a form.
+
+  This charm runs the upstream Enketo Express service together with the two
+  Redis instances it needs: a durable one holding in-flight form and instance
+  state, and an ephemeral one caching transformed forms. Both run as sidecar
+  containers by default, because Charmhub has no stable Redis charm; optional
+  `redis-main` and `redis-cache` relations take precedence when they are
+  present.
+
+  Enketo shares three secrets with ODK Central. This charm receives them over
+  the `odk-enketo` relation rather than generating them, and cannot start until
+  Central has published them.
+
+  This charm is for anyone running ODK Central on Kubernetes with Juju. It is
+  deployed alongside `odk-central-k8s` and `pyxform-k8s`.
+
+links:
+  documentation: https://tonyandrewmeyer.github.io/odk-central-operators/
+  issues: https://github.com/tonyandrewmeyer/odk-central-operators/issues
+  source: https://github.com/tonyandrewmeyer/odk-central-operators
+  website:
+    - https://docs.getodk.org
+    - https://github.com/enketo/enketo
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: charm
+    source: .
+    charm-requirements: [requirements.txt]
+    charm-strict-dependencies: true
+
+containers:
+  enketo:
+    resource: enketo-image
+  redis-main:
+    resource: redis-image
+    mounts:
+      - storage: redis-main-data
+        location: /data
+  redis-cache:
+    resource: redis-image
+
+resources:
+  enketo-image:
+    type: oci-image
+    description: |
+      Upstream Enketo Express. Pinned independently of the ODK Central release;
+      confirm the version against `enketo.dockerfile` at the Central tag you are
+      running.
+    upstream-source: ghcr.io/enketo/enketo:7.6.1
+  redis-image:
+    type: oci-image
+    description: |
+      Redis, used for both the durable and the cache instance. Ignored when
+      both the redis-main and redis-cache relations are in use.
+    upstream-source: redis:8.6.4
+
+storage:
+  redis-main-data:
+    type: filesystem
+    minimum-size: 1G
+    description: |
+      Persistent storage for the durable Redis instance, which holds Enketo's
+      in-flight form and instance state. This is the only state in the ODK
+      Central charm group that is not in PostgreSQL or the S3 blob store:
+      losing it loses submissions that respondents have started but not yet
+      sent. The cache instance is deliberately ephemeral and has no storage.
+
+requires:
+  odk-enketo:
+    interface: odk-enketo
+    limit: 1
+    description: |
+      Receives the three shared secrets and the deployment's public base URL
+      from ODK Central, and sends back the URL at which Central should reach
+      Enketo. Enketo cannot start without this relation.
+  redis-main:
+    interface: redis
+    limit: 1
+    optional: true
+    description: |
+      Optional external Redis for the durable instance. When related, the
+      in-charm redis-main sidecar is stopped and this endpoint is used instead.
+  redis-cache:
+    interface: redis
+    limit: 1
+    optional: true
+    description: |
+      Optional external Redis for the cache instance. When related, the
+      in-charm redis-cache sidecar is stopped and this endpoint is used instead.
+  logging:
+    interface: loki_push_api
+    description: Forwards the Enketo and Redis workload logs to Loki.
+
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+    description: Prometheus scrape target for Enketo and Redis metrics.
+  grafana-dashboard:
+    interface: grafana_dashboard
+    description: Grafana dashboard covering web form rendering and cache hit rate.
+
+config:
+  options:
+    offline-enabled:
+      type: boolean
+      default: true
+      description: |
+        Allow offline-capable web forms, which install a service worker so a
+        respondent can keep filling in a form after losing connectivity.
+    payload-limit:
+      type: string
+      default: 1mb
+      description: |
+        Maximum submission payload Enketo will accept, as a size string such as
+        "1mb" or "10mb". Raise it for forms that collect large attachments.
+    text-field-character-limit:
+      type: int
+      default: 1000000
+      description: |
+        Maximum characters accepted in a single text field. Lower it for
+        constrained deployments.
+    exclude-non-relevant:
+      type: boolean
+      default: true
+      description: |
+        Omit values for questions hidden by relevance logic instead of
+        submitting them. Changing this changes what ends up in your data.
+    redis-main-maxmemory:
+      type: string
+      default: ""
+      description: |
+        Optional `maxmemory` for the in-charm durable Redis instance, as a size
+        string such as "512mb". Empty means unlimited, which is upstream's
+        behaviour. Setting a limit on the durable instance risks evicting
+        in-flight form state; prefer growing the storage instead. Ignored when
+        the redis-main relation is in use.
+    redis-cache-maxmemory:
+      type: string
+      default: 256mb
+      description: |
+        `maxmemory` for the in-charm cache Redis instance. Eviction here is
+        harmless: cached forms are simply re-transformed. Ignored when the
+        redis-cache relation is in use.
+    log-level:
+      type: string
+      default: INFO
+      description: |
+        Workload log level. One of DEBUG, INFO, WARN or ERROR.
+
+actions:
+  flush-cache:
+    description: |
+      Flush the cache Redis instance, forcing every form to be transformed
+      again on next use. Use this after an Enketo upgrade renders stale cached
+      forms, or when a form renders incorrectly despite being correct in
+      Central. This never touches the durable instance, and refuses to run if
+      the cache endpoint resolves to the durable one.
+  redis-info:
+    description: |
+      Return the Redis INFO output from both instances, for diagnosing memory
+      pressure, eviction and connectivity. Useful when web forms are slow or
+      intermittently failing to load.
