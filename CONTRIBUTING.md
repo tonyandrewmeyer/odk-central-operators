@@ -50,6 +50,34 @@ uv run pytest tests/integration -v
 
 They need a bootstrapped Kubernetes controller and take roughly half an hour.
 
+### The controller runs out of disk before you expect it to
+
+Every `juju refresh --path=...` uploads the whole charm — around 20 MB for
+`odk-central-k8s` — into the controller's blob store, and old revisions are not
+reclaimed. A day of iterating on a charm fills a default 2 GiB controller
+volume, at which point MongoDB starts crash-looping with
+`Failed to write to /var/lib/juju/db/...` and every `juju` command hangs on
+"waiting for pod controller-0 to become ready".
+
+Bootstrap with more room than the default:
+
+```bash
+juju bootstrap k8s --storage-pool-size=16G
+```
+
+If you hit it, the volume can be grown in place on Canonical Kubernetes, whose
+storage class does not support expansion but does keep each volume as a plain
+image file:
+
+```bash
+sudo k8s kubectl scale statefulset controller -n controller-<name> --replicas=0
+IMG=/var/snap/k8s/common/rawfile-storage/<pvc>/disk.img
+sudo truncate -s 8G "$IMG"
+sudo e2fsck -f -p "$IMG"
+sudo resize2fs "$IMG"
+sudo k8s kubectl scale statefulset controller -n controller-<name> --replicas=1
+```
+
 ### Kubernetes flavour
 
 The dev-box workflow targets [Canonical

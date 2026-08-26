@@ -334,13 +334,20 @@ class OdkCentralCharm(ops.CharmBase):
 
     # Reconciliation
 
-    def _reconcile(self, *, migrate: bool = False) -> None:
+    def _reconcile(
+        self, *, migrate: bool = False, shared_secrets: EnketoSecrets | None = None
+    ) -> None:
         """Bring the workloads into line with configuration and relation data.
 
         Every hook routes through here rather than each handler doing its own
         partial update. That matters more in this charm than in most: its
         configuration depends on several relations that settle in any order, so
         per-relation handlers would each act on a different partial view.
+
+        ``shared_secrets`` overrides what would be read from the model. The
+        rotation action needs this: a new secret revision only becomes current
+        when the hook ends, so re-reading inside the hook that wrote it returns
+        the values being replaced.
         """
         invalid = self._invalid_config()
         if invalid:
@@ -352,7 +359,8 @@ class OdkCentralCharm(ops.CharmBase):
             self.unit.status = ops.WaitingStatus("waiting for the service container")
             return
 
-        shared_secrets = self._shared_secrets()
+        if shared_secrets is None:
+            shared_secrets = self._shared_secrets()
         if shared_secrets is None:
             self.unit.status = ops.WaitingStatus("waiting for the leader to generate secrets")
             return
@@ -1192,9 +1200,9 @@ class OdkCentralCharm(ops.CharmBase):
 
         self.unit.status = ops.MaintenanceStatus("rotating enketo secrets")
 
-        for label, length in SECRET_LENGTHS.items():
-            secret = self.model.get_secret(label=label)
-            secret.set_content({"value": generate_secret(length)})
+        values = {label: generate_secret(length) for label, length in SECRET_LENGTHS.items()}
+        for label, value in values.items():
+            self.model.get_secret(label=label).set_content({"value": value})
 
         # Republish so a relation that has not seen these IDs yet gets them.
         # Enketo learns about the new values through secret-changed, which is
@@ -1206,7 +1214,20 @@ class OdkCentralCharm(ops.CharmBase):
 
         # Central holds the API key in its own config too, so it has to be
         # re-rendered and restarted or the two ends disagree.
-        self._reconcile()
+        #
+        # The new values are passed in rather than read back: a secret revision
+        # written in this hook does not become current until the hook ends, so
+        # re-reading here would render the configuration with the key that is
+        # being replaced. Central would then keep using the old key -- and keep
+        # failing to authenticate to Enketo, which already has the new one --
+        # until some later event happened to reconcile it.
+        rotated = EnketoSecrets(
+            api_key=values[SECRET_LABEL_API_KEY],
+            encryption_key=values[SECRET_LABEL_ENCRYPTION_KEY],
+            less_secure_key=values[SECRET_LABEL_LESS_SECURE_KEY],
+        )
+        rotated.validate()
+        self._reconcile(shared_secrets=rotated)
 
         event.set_results(
             {

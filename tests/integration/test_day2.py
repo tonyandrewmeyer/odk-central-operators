@@ -10,8 +10,6 @@ import pytest
 
 from .conftest import DATA, Deployment
 
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
 
 def test_run_migrations(deployment: Deployment) -> None:
     """Migrations can be re-run by hand and report what happened."""
@@ -90,24 +88,13 @@ def test_flush_cache_only_touches_the_cache(deployment: Deployment) -> None:
 
 def test_purge_deleted(deployment: Deployment, project: dict[str, Any]) -> None:
     """A soft-deleted form can be purged for good."""
-    response = deployment.api(
-        "POST",
-        f"/v1/projects/{project['id']}/forms?ignoreWarnings=true&publish=true",
-        headers={
-            "Content-Type": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-            "X-XlsForm-FormId-Fallback": "purge_test_form",
-        },
-        data=(
-            __import__("pathlib").Path(__file__).parent.parent / "data" / "minimal.xlsx"
-        ).read_bytes(),
-    )
-    assert response.status_code == 200, response.text
+    form_id = deployment.publish_form(project["id"], "purge_test_form")["xmlFormId"]
 
-    deleted = deployment.api("DELETE", f"/v1/projects/{project['id']}/forms/purge_test_form")
+    deleted = deployment.api("DELETE", f"/v1/projects/{project['id']}/forms/{form_id}")
     assert deleted.status_code == 200, deleted.text
 
     result = deployment.juju.run("odk-central-k8s/0", "purge-deleted", {"force": True})
     assert "completed" in result.results["result"]
 
-    gone = deployment.api("GET", f"/v1/projects/{project['id']}/forms/purge_test_form")
+    gone = deployment.api("GET", f"/v1/projects/{project['id']}/forms/{form_id}")
     assert gone.status_code == 404

@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 from charm import SECRET_LABEL_ADMIN_PASSWORD, OdkCentralCharm
-from charms.odk_central_k8s.v0.odk_enketo import SECRET_LENGTHS
+from charms.odk_central_k8s.v0.odk_enketo import SECRET_LABEL_API_KEY, SECRET_LENGTHS
 from ops import testing
 
 from conftest import migrations_exec
@@ -720,3 +720,50 @@ def test_backup_fails_cleanly_if_the_dump_file_is_missing(
         ctx.run(ctx.on.action("backup", params={"destination": "nightly"}), state_in)
 
     assert "no dump file" in excinfo.value.message
+
+
+def test_rotation_renders_with_the_values_it_just_generated(
+    ctx: testing.Context[OdkCentralCharm],
+    cli_service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    shared_secrets: set[testing.Secret],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reconcile must be handed the new secrets, not left to re-read them.
+
+    A Juju secret revision written during a hook does not become current until
+    that hook ends, so re-reading inside the rotation returns the values being
+    replaced: Central would keep presenting the old key to an Enketo that
+    already has the new one, and every web form would fail until some unrelated
+    later event reconciled it.
+
+    Asserted through the call rather than through the rendered file, because
+    Scenario does not reproduce Juju's revision visibility -- it makes a new
+    revision readable immediately, so a test against the output would pass
+    whether or not the charm got this right. The behaviour itself is covered by
+    tests/integration/test_secrets.py.
+    """
+    captured: dict[str, object] = {}
+    original = OdkCentralCharm._reconcile
+
+    def spy(self: OdkCentralCharm, **kwargs: object) -> None:
+        captured.update(kwargs)
+        original(self, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(OdkCentralCharm, "_reconcile", spy)
+    state_in = testing.State(
+        containers={cli_service, nginx},
+        relations={postgresql},
+        secrets=shared_secrets,
+        leader=True,
+    )
+
+    state_out = ctx.run(ctx.on.action("rotate-enketo-secrets"), state_in)
+
+    rotated = next(
+        s.latest_content["value"] for s in state_out.secrets if s.label == SECRET_LABEL_API_KEY
+    )
+    passed = captured.get("shared_secrets")
+    assert passed is not None, "the reconcile was left to re-read the secrets"
+    assert passed.api_key == rotated  # type: ignore[union-attr]

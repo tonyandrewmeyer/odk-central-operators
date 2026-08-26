@@ -7,9 +7,7 @@ from typing import Any
 import jubilant
 import requests
 
-from .conftest import CHARMS, DATA, Deployment, charm_path
-
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+from .conftest import CHARMS, Deployment, charm_path
 
 
 def test_refresh_charm(deployment: Deployment, project: dict[str, Any]) -> None:
@@ -25,21 +23,11 @@ def test_refresh_charm(deployment: Deployment, project: dict[str, Any]) -> None:
 
     deployment.juju.wait(jubilant.all_active, timeout=25 * 60)
 
-    response = deployment.api(
-        "POST",
-        f"/v1/projects/{project['id']}/forms?ignoreWarnings=true&publish=true",
-        headers={"Content-Type": XLSX, "X-XlsForm-FormId-Fallback": "post_refresh_form"},
-        data=(DATA / "minimal.xlsx").read_bytes(),
-    )
-    assert response.status_code == 200, response.text
-
-    form = response.json()
+    form = deployment.publish_form(project["id"], "post_refresh_form")
     # Still able to authenticate to Enketo, so the shared secrets survived.
-    assert form["enketoId"]
+    enketo_id = deployment.wait_for_enketo_id(project["id"], form["xmlFormId"])
 
-    rendered = requests.get(
-        f"{deployment.base_url}/enketo-passthrough/{form['enketoId']}", timeout=120
-    )
+    rendered = requests.get(f"{deployment.base_url}/enketo-passthrough/{enketo_id}", timeout=120)
     assert rendered.status_code == 200
 
     served = requests.get(f"{deployment.base_url}/v1/config/public", timeout=60)

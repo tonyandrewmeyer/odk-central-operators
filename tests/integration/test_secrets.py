@@ -12,28 +12,13 @@ from typing import Any
 import jubilant
 import requests
 
-from .conftest import DATA, Deployment
-
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-
-def _publish_form(deployment: Deployment, project_id: int, form_id: str) -> dict[str, Any]:
-    """Publish a form and return it."""
-    response = deployment.api(
-        "POST",
-        f"/v1/projects/{project_id}/forms?ignoreWarnings=true&publish=true",
-        headers={"Content-Type": XLSX, "X-XlsForm-FormId-Fallback": form_id},
-        data=(DATA / "minimal.xlsx").read_bytes(),
-    )
-    response.raise_for_status()
-    return dict(response.json())
+from .conftest import Deployment
 
 
 def test_rotate_enketo_secrets(deployment: Deployment, project: dict[str, Any]) -> None:
     """After a rotation, web forms still render."""
-    form = _publish_form(deployment, project["id"], "rotation_test_form")
-    enketo_id = form["enketoId"]
-    assert enketo_id, "the form had no Enketo id even before rotating"
+    form = deployment.publish_form(project["id"], "rotation_test_form")
+    enketo_id = deployment.wait_for_enketo_id(project["id"], form["xmlFormId"])
 
     before = requests.get(f"{deployment.base_url}/enketo-passthrough/{enketo_id}", timeout=120)
     assert before.status_code == 200
@@ -56,9 +41,9 @@ def test_a_new_form_still_gets_an_enketo_id_after_rotation(
     deployment: Deployment, project: dict[str, Any]
 ) -> None:
     """Central can still authenticate to Enketo with the rotated key."""
-    form = _publish_form(deployment, project["id"], "post_rotation_form")
+    form = deployment.publish_form(project["id"], "post_rotation_form")
 
-    assert form["enketoId"]
+    assert deployment.wait_for_enketo_id(project["id"], form["xmlFormId"])
 
 
 def test_secrets_are_not_in_config(deployment: Deployment) -> None:

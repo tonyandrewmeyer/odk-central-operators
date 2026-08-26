@@ -1,14 +1,15 @@
 """Fixtures for the ODK Central charm group's integration tests.
 
-One deployment serves the whole suite. Standing the group up takes long enough
-that a per-test model would make the suite unusable, and the interesting
-failures in this charm group are the ones that only happen across charm
-boundaries, so the tests are written to share a model without depending on each
-other's ordering.
+One deployment serves the whole suite. Standing the group up takes about
+twenty-five minutes, so a per-module model would make the suite unusable, and
+the interesting failures in this charm group are the ones that only happen
+across charm boundaries anyway. The tests share a model and are written not to
+depend on each other's ordering, with one exception noted in test_secrets.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from urllib.parse import urlparse
 import jubilant
 import pytest
 import requests
+from openpyxl import Workbook
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,16 @@ IMAGES = {
 # pg_dump refuses to dump a newer server. See docs/day2-ops.md.
 POSTGRESQL_CHANNEL = "14/stable"
 
+XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# How long to keep retrying a publish that fails because the conversion service
+# is briefly unreachable, which happens for a few seconds after a refresh.
+PUBLISH_RETRY_SECONDS = 120
+
+# Central fills the Enketo id in from a background worker, so it is not always
+# present on the response to the upload.
+ENKETO_ID_TIMEOUT = 180
+
 DEPLOY_TIMEOUT = 45 * 60
 SETTLE_TIMEOUT = 20 * 60
 
@@ -70,6 +82,33 @@ def charm_path(name: str) -> Path:
             f"charms/{name}, or set CHARM_ARTIFACT_DIR."
         )
     return candidates[0]
+
+
+def make_xlsform(form_id: str, *, with_attachment: bool = False) -> bytes:
+    """Return an XLSForm with the given form id.
+
+    Built here rather than loaded from a fixture file because ODK Central takes
+    the form id from the spreadsheet's own settings sheet -- the
+    X-XlsForm-FormId-Fallback header only applies when the sheet does not
+    provide one. Every test that publishes a form therefore needs its own
+    spreadsheet, or the second upload into a project is a 409.
+    """
+    workbook = Workbook()
+    survey = workbook.active
+    assert survey is not None
+    survey.title = "survey"
+    survey.append(["type", "name", "label"])
+    survey.append(["text", "name_of_respondent", "What is your name?"])
+    if with_attachment:
+        survey.append(["image", "photo", "Take a photo"])
+
+    settings = workbook.create_sheet("settings")
+    settings.append(["form_title", "form_id", "version"])
+    settings.append([f"Integration form {form_id}", form_id, "1"])
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 @dataclass
@@ -111,6 +150,69 @@ class Deployment:
             method, f"{self.base_url}{path}", headers=headers, timeout=120, **kwargs
         )
 
+    def publish_form(
+        self, project_id: int, form_id: str, *, with_attachment: bool = False
+    ) -> dict[str, Any]:
+        """Upload and publish a form, and return it.
+
+        Goes through pyxform-k8s, and the Enketo id in the result is what says
+        Central could authenticate to enketo-k8s with the shared secret.
+
+        Retries a 502 for a short while. Central reports one when it cannot
+        reach the conversion service, which happens legitimately for a few
+        seconds after a refresh: both applications report active before the
+        Kubernetes Service behind pyxform has endpoints again.
+        """
+        payload = make_xlsform(form_id, with_attachment=with_attachment)
+        deadline = time.monotonic() + PUBLISH_RETRY_SECONDS
+        while True:
+            response = self.api(
+                "POST",
+                f"/v1/projects/{project_id}/forms?ignoreWarnings=true&publish=true",
+                headers={"Content-Type": XLSX_CONTENT_TYPE},
+                data=payload,
+            )
+            if response.status_code != 502 or time.monotonic() > deadline:
+                break
+            logger.warning("conversion service not reachable yet, retrying: %s", response.text)
+            time.sleep(5)
+
+        assert response.status_code == 200, response.text
+        form = dict(response.json())
+        # Central takes the id from the spreadsheet's settings sheet. If that
+        # ever stops being true, every test that publishes more than one form
+        # would collide instead of failing here.
+        assert form["xmlFormId"] == form_id, form
+        return form
+
+    def wait_for_enketo_id(self, project_id: int, form_id: str) -> str:
+        """Return the form's Enketo id once Central has one, or fail.
+
+        Central does not always have the id by the time it answers the upload:
+        `pushFormToEnketo` is a background worker, and the request only carries
+        an id when the call happened to complete inline. Asserting on the
+        response is therefore a coin toss, and one that lands differently right
+        after a restart.
+
+        An id appearing at all is what proves Central authenticated to Enketo
+        with the shared secret; an id that never appears is the failure worth
+        reporting.
+        """
+        deadline = time.monotonic() + ENKETO_ID_TIMEOUT
+        last: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            response = self.api("GET", f"/v1/projects/{project_id}/forms/{form_id}")
+            if response.status_code == 200:
+                last = dict(response.json())
+                if last.get("enketoId"):
+                    return str(last["enketoId"])
+            time.sleep(5)
+
+        pytest.fail(
+            f"{form_id} never got an Enketo id, which means Central could not "
+            f"authenticate to Enketo with the shared secret. Last state: {last}"
+        )
+
 
 def _traefik_hostname(juju: jubilant.Juju) -> str:
     """Return the hostname traefik will serve the deployment at.
@@ -142,7 +244,7 @@ def _wait_for(predicate: Any, timeout: int, description: str) -> None:
     pytest.fail(f"timed out waiting for {description}")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def deployment() -> Generator[Deployment, None, None]:
     """Deploy the whole charm group and yield a handle with admin credentials."""
     with jubilant.temp_model() as juju:
@@ -196,7 +298,7 @@ def deployment() -> Generator[Deployment, None, None]:
         yield deployed
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def project(deployment: Deployment) -> dict[str, Any]:
     """Create a project for the suite to work in."""
     response = deployment.api("POST", "/v1/projects", json={"name": "integration"})
