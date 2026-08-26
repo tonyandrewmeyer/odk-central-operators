@@ -1,0 +1,2547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code transcript - Index</title>
+    <style>
+:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
+.container { max-width: 800px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
+.header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
+.header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
+.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
+.message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
+.message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
+.tool-reply .role-label { color: #e65100; }
+.tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
+.tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
+.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.user .role-label { color: var(--user-border); }
+time { color: var(--text-muted); font-size: 0.8rem; }
+.timestamp-link { color: inherit; text-decoration: none; }
+.timestamp-link:hover { text-decoration: underline; }
+.message:target { animation: highlight 2s ease-out; }
+@keyframes highlight { 0% { background-color: rgba(25, 118, 210, 0.2); } 100% { background-color: transparent; } }
+.message-content { padding: 16px; }
+.message-content p { margin: 0 0 12px 0; }
+.message-content p:last-child { margin-bottom: 0; }
+.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 0.9rem; color: var(--thinking-text); }
+.thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
+.thinking p { margin: 8px 0; }
+.assistant-text { margin: 8px 0; }
+.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.tool-icon { font-size: 1.1rem; }
+.tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
+.tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.tool-result.tool-error { background: var(--tool-error-bg); }
+.file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
+.write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
+.edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
+.file-tool-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+.write-header { color: #2e7d32; }
+.edit-header { color: #e65100; }
+.file-tool-icon { font-size: 1rem; }
+.file-tool-path { font-family: monospace; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 4px; }
+.file-tool-fullpath { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
+.file-content { margin: 0; }
+.edit-section { display: flex; margin: 4px 0; border-radius: 4px; overflow: hidden; }
+.edit-label { padding: 8px 12px; font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
+.edit-old { background: #fce4ec; }
+.edit-old .edit-label { color: #b71c1c; background: #f8bbd9; }
+.edit-old .edit-content { color: #880e4f; }
+.edit-new { background: #e8f5e9; }
+.edit-new .edit-label { color: #1b5e20; background: #a5d6a7; }
+.edit-new .edit-content { color: #1b5e20; }
+.edit-content { margin: 0; flex: 1; background: transparent; font-size: 0.85rem; }
+.edit-replace-all { font-size: 0.75rem; font-weight: normal; color: var(--text-muted); }
+.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #e6f4ea); }
+.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff0e5); }
+.todo-list { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border: 1px solid #81c784; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.todo-header { font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+.todo-items { list-style: none; margin: 0; padding: 0; }
+.todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 0.9rem; }
+.todo-item:last-child { border-bottom: none; }
+.todo-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%; }
+.todo-completed .todo-icon { color: #2e7d32; background: rgba(46, 125, 50, 0.15); }
+.todo-completed .todo-content { color: #558b2f; text-decoration: line-through; }
+.todo-in-progress .todo-icon { color: #f57c00; background: rgba(245, 124, 0, 0.15); }
+.todo-in-progress .todo-content { color: #e65100; font-weight: 500; }
+.todo-pending .todo-icon { color: #757575; background: rgba(0,0,0,0.05); }
+.todo-pending .todo-content { color: #616161; }
+pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
+pre.json { color: #e0e0e0; }
+code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+.user-content { margin: 0; }
+.truncatable { position: relative; }
+.truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
+.truncatable.truncated::after { content: ''; position: absolute; bottom: 32px; left: 0; right: 0; height: 60px; background: linear-gradient(to bottom, transparent, var(--card-bg)); pointer-events: none; }
+.message.user .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--user-bg)); }
+.message.tool-reply .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
+.tool-use .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-bg)); }
+.tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-result-bg)); }
+.expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
+.expand-btn:hover { background: rgba(0,0,0,0.1); }
+.truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
+.pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
+.pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
+.pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
+.pagination a:hover { background: var(--user-bg); }
+.pagination .current { background: var(--user-border); color: white; }
+.pagination .disabled { color: var(--text-muted); border: 1px solid #ddd; }
+.pagination .index-link { background: var(--user-border); color: white; }
+details.continuation { margin-bottom: 16px; }
+details.continuation summary { cursor: pointer; padding: 12px 16px; background: var(--user-bg); border-left: 4px solid var(--user-border); border-radius: 12px; font-weight: 500; color: var(--text-muted); }
+details.continuation summary:hover { background: rgba(25, 118, 210, 0.15); }
+details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom: 0; }
+.index-item { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background: var(--user-bg); border-left: 4px solid var(--user-border); }
+.index-item a { display: block; text-decoration: none; color: inherit; }
+.index-item a:hover { background: rgba(25, 118, 210, 0.1); }
+.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.index-item-number { font-weight: 600; color: var(--user-border); }
+.index-item-content { padding: 16px; }
+.index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
+.index-item-commit { margin-top: 6px; padding: 4px 8px; background: #fff3e0; border-radius: 4px; font-size: 0.85rem; color: #e65100; }
+.index-item-commit code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; margin-right: 6px; }
+.commit-card { margin: 8px 0; padding: 10px 14px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 6px; }
+.commit-card a { text-decoration: none; color: #5d4037; display: block; }
+.commit-card a:hover { color: #e65100; }
+.commit-card-hash { font-family: monospace; color: #e65100; font-weight: 600; margin-right: 8px; }
+.index-commit { margin-bottom: 12px; padding: 10px 16px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.index-commit a { display: block; text-decoration: none; color: inherit; }
+.index-commit a:hover { background: rgba(255, 152, 0, 0.1); margin: -10px -16px; padding: 10px 16px; border-radius: 8px; }
+.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 4px; }
+.index-commit-hash { font-family: monospace; color: #e65100; font-weight: 600; }
+.index-commit-msg { color: #5d4037; }
+.index-item-long-text { margin-top: 8px; padding: 12px; background: var(--card-bg); border-radius: 8px; border-left: 3px solid var(--assistant-border); }
+.index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
+.index-item-long-text-content { color: var(--text-color); }
+#search-box { display: none; align-items: center; gap: 8px; }
+#search-box input { padding: 6px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; width: 180px; }
+#search-box button, #modal-search-btn, #modal-close-btn { background: var(--user-border); color: white; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+#search-box button:hover, #modal-search-btn:hover { background: #1565c0; }
+#modal-close-btn { background: var(--text-muted); margin-left: 8px; }
+#modal-close-btn:hover { background: #616161; }
+#search-modal[open] { border: none; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
+#search-modal::backdrop { background: rgba(0,0,0,0.5); }
+.search-modal-header { display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--assistant-border); background: var(--bg-color); border-radius: 12px 12px 0 0; }
+.search-modal-header input { flex: 1; padding: 8px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; }
+#search-status { padding: 8px 16px; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
+#search-results { flex: 1; overflow-y: auto; padding: 16px; }
+.search-result { margin-bottom: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.search-result a { display: block; text-decoration: none; color: inherit; }
+.search-result a:hover { background: rgba(25, 118, 210, 0.05); }
+.search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
+.search-result-content { padding: 12px; }
+.search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
+@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
+</style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-row">
+            <h1>Claude Code transcript</h1>
+            <div id="search-box">
+                <input type="text" id="search-input" placeholder="Search..." aria-label="Search transcripts">
+                <button id="search-btn" type="button" aria-label="Search">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                </button>
+            </div>
+        </div>
+        
+
+<div class="pagination">
+<span class="current">Index</span>
+<span class="disabled">&larr; Prev</span>
+<a href="page-001.html">1</a>
+<a href="page-001.html">Next &rarr;</a>
+</div>
+
+        <p style="color: var(--text-muted); margin-bottom: 24px;">4 prompts · 1561 messages · 514 tool calls · 0 commits · 1 pages</p>
+        
+<div class="index-item"><a href="page-001.html#msg-2026-08-26T06-26-54-845Z"><div class="index-item-header"><span class="index-item-number">#1</span><time datetime="2026-08-26T06:26:54.845Z" data-timestamp="2026-08-26T06:26:54.845Z">2026-08-26T06:26:54.845Z</time></div><div class="index-item-content"><h1>Build Prompt: <code>odk-central-operators</code> — Production-Grade Juju K8s Charm Group</h1>
+<p>This document is a self-contained build prompt for a dev-box agent
+session. The consuming agent may not be Claude Code. It runs unattended
+(equivalent to <code>--dangerously-skip-permissions</code>) on a machine with
+<code>juju</code>, <code>charmcraft</code>, <code>git</code>, and a bootstrapped Kubernetes. Prefer
+Canonical Kubernetes (<code>k8s</code>) wherever the choice arises; microk8s is a
+fallback only. No interactive checkpoints occur after Phase 0.</p>
+<p>References to <code>mastodon-operator</code>, <code>sentry-operators</code>,
+<code>hedgedoc-operator</code>, <code>windmill-operators</code>, <code>zammad-operator</code>,
+<code>flagsmith-operators</code>, <code>tracecat-operator</code> and
+<code>dependencytrack-operators</code> in the <code>tonyandrewmeyer/</code> namespace on
+GitHub are prior operator work used here as background context on
+repository conventions only. This charm group is not derived from them.</p>
+<p><strong>What is being built.</strong> ODK Central is the server half of the ODK
+ecosystem: forms authored as XLSForm spreadsheets are converted to
+XForms, filled in offline on a mobile client or in a browser, and
+submitted back to Central. Upstream ships it as an eight-container
+Docker Compose stack. This build produces <strong>three charms</strong> in one
+repository, deployed as a group, plus the two charm libraries that bind
+them together.</p>
+<p>Desk recon and scoring for this candidate: <code>RECON-odk-central.md</code> in
+<code>non-roadmap/own-a-charm/</code> of the work-queue repo. Category context:
+<code>RECON-forms.md</code>. Read neither to build — everything needed is below.</p>
+<hr />
+<h2>USER ANSWERS REQUIRED — Read Before Phase 0</h2>
+<p>Collect all answers before running Phase 0. The build does not pause
+again after Phase 0 completes.</p>
+<pre><code>Q1 — GitHub namespace
+     Which GitHub user or organisation hosts the repo?
+     Default: tonyandrewmeyer
+     The repository will be created at &lt;namespace&gt;/odk-central-operators.
+     It holds all three charms; there is no separate repo per charm.
+
+Q2 — Juju k8s controller name
+     What is the name of the bootstrapped Kubernetes controller?
+     Run to list available: juju controllers --format=yaml
+     Canonical Kubernetes (k8s) is preferred over microk8s. If both are
+     bootstrapped, use the k8s one.
+
+Q3 — ODK Central version to target
+     Which release should the charms pin on day one?
+     To find the latest, list the tags on the official image:
+       TOKEN=$(curl -s &quot;https://ghcr.io/token?scope=repository:getodk/central-service:pull&amp;service=ghcr.io&quot; | jq -r .token)
+       curl -s -H &quot;Authorization: Bearer $TOKEN&quot; \
+         https://ghcr.io/v2/getodk/central-service/tags/list | jq -r '.tags[-5:]'
+     Recommended starting point as of 2026-08-25: v2026.2.4
+     Write the tag with the leading &quot;v&quot;: v2026.2.4
+     The same tag pins BOTH central-service and central-nginx — they are
+     released together and must not be mismatched.
+
+Q4 — Enketo and pyxform versions
+     Enketo default: 7.6.1  (ghcr.io/enketo/enketo)
+     pyxform default: v4.5.0 (ghcr.io/getodk/pyxform-http)
+     These are pinned independently of Q3. Confirm the versions the
+     chosen Central release expects by reading enketo.dockerfile and
+     docker-compose.yml at the Q3 tag of getodk/central:
+       https://raw.githubusercontent.com/getodk/central/&lt;Q3&gt;/enketo.dockerfile
+       https://raw.githubusercontent.com/getodk/central/&lt;Q3&gt;/docker-compose.yml
+     If those files name different versions, the upstream files win.
+
+Q5 — Redis backing for Enketo
+     Enketo needs two Redis instances with different persistence
+     semantics. Charmhub has no stable Redis charm (redis-k8s is
+     latest/edge revision 23, released 2022-12-05).
+     Default: in-charm — run both as sidecar containers inside
+     enketo-k8s, with Juju filesystem storage for the durable one.
+     Alternative: relate — wire optional redis-main / redis-cache
+     relations and deploy redis-k8s from latest/edge.
+     Default: in-charm (the relations are still declared and take
+     precedence when present; see Architecture Decisions).
+     Answer: in-charm or relate
+
+Q6 — Public domain name
+     The fully qualified domain the deployment will be reached at.
+     ODK Central will not work with a bare IP address — the frontend
+     bakes the origin into its client config and Enketo's linked-server
+     URL must match.
+     For a test deploy, a nip.io style name against the traefik
+     external IP is acceptable, e.g. odk.10-0-0-5.nip.io
+     Example: odk.example.com
+
+Q7 — Initial admin email
+     Email address for the first Central web user, which the
+     create-admin action promotes to administrator.
+     Stored as a Juju secret, never in charm config.
+     Example: ops-team@example.com
+
+Q8 — Day-one authentication mode
+     Options: password, oidc
+     Default: password
+     IMPORTANT: these are mutually exclusive upstream. With OIDC
+     enabled, HTTP Basic auth and POST /v1/session stop working
+     entirely. This answer controls what Phase 4's smoke test and the
+     Phase 10 integration suite authenticate with. OIDC is wired and
+     tested in Phase 8 regardless of this answer.
+
+Q9 — Charmhub entity names and track
+     Defaults: odk-central-k8s, enketo-k8s, pyxform-k8s
+     Default track: latest
+     Central uses date-based versions (2026.2.x), so a version track
+     would need renaming every quarter; latest/edge → latest/candidate
+     is the intended promotion path. Confirm or supply alternatives.
+
+Q10 — Error reporting
+     Upstream's shipped compose defaults contain ODK's OWN Sentry DSN,
+     organisation subdomain and project key. A naive deploy reports
+     errors to the ODK project's telemetry.
+     Default: disabled — the charm blanks every SENTRY_* value unless
+     an operator sets its own DSN via config.
+     Answer: disabled, or supply your own DSN.
+</code></pre>
+<hr />
+<h2>Architecture Decisions (pre-resolved)</h2>
+<p>These decisions are final. Do not re-debate them during the build.</p>
+<p><strong>Kubernetes-only for v1.</strong> <code>postgresql-k8s</code>, <code>traefik-k8s</code>,
+<code>s3-integrator</code>, <code>smtp-integrator</code> and the COS charms all have mature
+k8s variants, and upstream ships only container images. A machine charm
+is out of scope for this build.</p>
+<p><strong>Three Juju applications, seven containers.</strong> The group is:</p>
+<table>
+<thead>
+<tr>
+<th>Charm</th>
+<th>Containers</th>
+<th>Why separate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>odk-central-k8s</code></td>
+<td><code>service</code>, <code>nginx</code></td>
+<td>The API and the frontend/reverse-proxy are released together and version-locked; they belong in one application</td>
+</tr>
+<tr>
+<td><code>enketo-k8s</code></td>
+<td><code>enketo</code>, plus <code>redis-main</code> and <code>redis-cache</code> under Q5 default</td>
+<td>Enketo is an independently versioned upstream (<code>enketo/enketo</code>) with its own state; it scales and upgrades on its own cadence</td>
+</tr>
+<tr>
+<td><code>pyxform-k8s</code></td>
+<td><code>pyxform</code></td>
+<td>A stateless XLSForm→XForm converter with its own release train; separating it makes the conversion service replaceable and independently scalable</td>
+</tr>
+</tbody>
+</table>
+<p>Do not collapse these into one application. The cross-charm bootstrap
+ordering and the provided interface are the point of the exercise.</p>
+<p><strong><code>SSL_TYPE=upstream</code>.</strong> Upstream's nginx image can obtain Let's
+Encrypt certificates itself. In Juju, TLS is <code>traefik-k8s</code>'s job. Set
+<code>SSL_TYPE=upstream</code> so nginx serves plain HTTP on 80 and trusts
+<code>X-Forwarded-Proto</code>. Never enable certbot inside the charm.</p>
+<p><strong>No <code>secrets</code> container.</strong> Upstream's one-shot <code>secrets</code> container
+writes three files to a shared Docker volume. Juju has no shared volume
+between applications, so <code>odk-central-k8s</code> generates all three values
+in its <code>install</code> hook, stores them as application-owned Juju secrets,
+and distributes them to <code>enketo-k8s</code> over the <code>odk-enketo</code> relation.
+This is the charm-group design's centrepiece.</p>
+<p><strong>Exact secret lengths are load-bearing.</strong>
+<code>files/enketo/start-enketo.sh</code> upstream asserts, with <code>stat -c "%s"</code>,
+that <code>/etc/secrets/enketo-secret</code> is exactly <strong>64</strong> bytes,
+<code>/etc/secrets/enketo-less-secret</code> exactly <strong>32</strong> bytes, and
+<code>/etc/secrets/enketo-api-key</code> exactly <strong>128</strong> bytes. Enketo refuses to
+start otherwise. When the <code>enketo-k8s</code> charm pushes these files with
+Pebble, write <strong>no trailing newline</strong> and assert the length in charm
+code before pushing. A stray <code>\n</code> is a 65-byte file and a hard startup
+failure with an unhelpful message.</p>
+<p><strong>Two new charm libraries, written here.</strong> No published charmlib exists
+for either interface. Write and ship:</p>
+<ul>
+<li><code>lib/charms/odk_central_k8s/v0/odk_enketo.py</code> — <code>OdkEnketoProvider</code>
+  (in <code>odk-central-k8s</code>) and <code>OdkEnketoRequirer</code> (in <code>enketo-k8s</code>).
+  Provider sends: secret IDs for the three shared secrets, and the
+  public base URL. Requirer sends back: the in-cluster Enketo URL that
+  Central puts in <code>config.json</code> under <code>enketo.url</code>.</li>
+<li><code>lib/charms/pyxform_k8s/v0/xlsform.py</code> — <code>XlsformProvider</code> (in
+  <code>pyxform-k8s</code>) and <code>XlsformRequirer</code> (in <code>odk-central-k8s</code>).
+  Provider sends host and port; requirer consumes them into
+  <code>config.json</code> under <code>xlsform</code>.</li>
+</ul>
+<p>Both are bidirectional; model them on <code>data_platform_libs</code> conventions
+for event naming (<code>*_ready</code>, <code>*_gone</code>) and emit custom events rather
+than making the charm handle raw <code>relation-changed</code>.</p>
+<p><strong>Charm libraries over hand-rolled requirers everywhere else.</strong> Where a
+published charmlib exists for a relation interface, import it. Hand
+rolling is acceptable only for the two ODK-specific interfaces above.</p>
+<p><strong>Redis default is in-charm (Q5).</strong> <code>redis-main</code> and <code>redis-cache</code> run
+as sidecar containers in <code>enketo-k8s</code>, <code>redis-main</code> mounting a Juju
+<code>filesystem</code> storage at <code>/data</code> with upstream's persistence settings
+(<code>save 300 1</code>, <code>appendonly no</code>, <code>dbfilename enketo-main.rdb</code>) and
+<code>redis-cache</code> running with persistence off. The charm ALSO declares
+optional <code>redis-main</code> and <code>redis-cache</code> relations (interface <code>redis</code>);
+when either is related, the corresponding sidecar is stopped and the
+relation endpoint is used instead. Attempt the relation path once in
+Phase 6 against <code>redis-k8s --channel latest/edge</code> and record the result
+in <code>docs/day2-ops.md</code> whichever way it goes.</p>
+<p><strong><code>jubilant</code> for integration tests, <code>ops.testing</code> for unit tests.</strong> Do
+not use <code>pytest-operator</code>.</p>
+<p><strong>Juju secrets for every credential.</strong> No password, key, token or DSN
+appears in <code>config:</code>.</p>
+<p><strong><code>charmcraft 4.x</code> + <code>ops 3.x</code>.</strong> Verify at Phase 0; if newer minors
+are available, use them. Do not pin below these majors.</p>
+<p><strong>Apache 2.0 for the charms.</strong> The upstream workload is Apache-2.0
+throughout — <code>getodk/central</code>, <code>central-backend</code>, <code>central-frontend</code>
+and <code>enketo/enketo</code> — so unlike most candidates in this category there
+is no licence divergence to document. Say so explicitly in
+<code>CONTRIBUTING.md</code>; it is the reason this upstream was chosen.</p>
+<p><strong><code>mkdocs-material</code> for the docs site</strong>, one site for all three charms.</p>
+<p><strong><code>release-please</code> for release automation</strong>, <code>uv</code> for Python
+dependency management, Conventional Commits throughout.</p>
+<p><strong>Commit directly to <code>origin/main</code>.</strong> No feature branches. Each phase
+ends with a commit and <code>git push -u origin main</code>.</p>
+<hr />
+<h2>ODK Central Component Map</h2>
+<p>Sourced from <code>docker-compose.yml</code>, <code>.env.template</code>,
+<code>files/service/config.json.template</code>,
+<code>files/enketo/config.json.template</code>,
+<code>files/enketo/start-enketo.sh</code> and
+<code>files/enketo/redis-enketo-main.conf</code> at <code>getodk/central</code> master,
+verified 2026-08-25. Re-verify at the Q3 tag before writing code.</p>
+<h3>Services and their roles</h3>
+<table>
+<thead>
+<tr>
+<th>Upstream service</th>
+<th>Image</th>
+<th>Charm</th>
+<th>Pebble service</th>
+<th>Mandatory?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>service</code></td>
+<td><code>ghcr.io/getodk/central-service:&lt;Q3&gt;</code></td>
+<td>odk-central-k8s</td>
+<td><code>service</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>nginx</code></td>
+<td><code>ghcr.io/getodk/central-nginx:&lt;Q3&gt;</code></td>
+<td>odk-central-k8s</td>
+<td><code>nginx</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>enketo</code></td>
+<td><code>ghcr.io/enketo/enketo:&lt;Q4&gt;</code></td>
+<td>enketo-k8s</td>
+<td><code>enketo</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>enketo_redis_main</code></td>
+<td><code>redis:8.6.4</code></td>
+<td>enketo-k8s</td>
+<td><code>redis-main</code></td>
+<td>Yes (or relation)</td>
+</tr>
+<tr>
+<td><code>enketo_redis_cache</code></td>
+<td><code>redis:8.6.4</code></td>
+<td>enketo-k8s</td>
+<td><code>redis-cache</code></td>
+<td>Yes (or relation)</td>
+</tr>
+<tr>
+<td><code>pyxform</code></td>
+<td><code>ghcr.io/getodk/pyxform-http:&lt;Q4&gt;</code></td>
+<td>pyxform-k8s</td>
+<td><code>pyxform</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>secrets</code></td>
+<td>—</td>
+<td>none</td>
+<td>—</td>
+<td>Replaced by charm-generated Juju secrets</td>
+</tr>
+<tr>
+<td><code>postgres14</code></td>
+<td>—</td>
+<td>none</td>
+<td>—</td>
+<td><code>postgresql-k8s</code> relation</td>
+</tr>
+<tr>
+<td><code>mail</code></td>
+<td>—</td>
+<td>none</td>
+<td>—</td>
+<td><code>smtp-integrator</code> relation</td>
+</tr>
+</tbody>
+</table>
+<p><code>postgres</code> (the 9.6→14 upgrade helper) has no charm equivalent and is
+not built. Note it in <code>docs/day2-ops.md</code> under migration-from-compose.</p>
+<h3>Pebble service startup order</h3>
+<p><strong><code>odk-central-k8s</code>:</strong></p>
+<ol>
+<li>Block until <code>postgresql</code> relation data is complete.</li>
+<li>Render <code>/usr/odk/config/local.json</code> (or wherever the image expects
+   its config — verify against the image, see Phase 4) from the
+   template, including database, email, xlsform, enketo, oidc and
+   s3blobStore stanzas.</li>
+<li>Run migrations as a one-shot Pebble service (<code>migrations</code>,
+   <code>startup: disabled</code>, started by charm code, exit code checked).</li>
+<li>Start <code>service</code>; gate <code>ActiveStatus</code> on
+   <code>GET http://localhost:8383/v1/version.json</code> returning 200.</li>
+<li>Start <code>nginx</code> only once <code>service</code> is healthy — the nginx config
+   proxies to it and will fail its own healthcheck otherwise.</li>
+</ol>
+<p><code>nginx</code> additionally needs <code>DOMAIN</code>, <code>SSL_TYPE=upstream</code>, <code>HTTPS_PORT</code>
+and <code>OIDC_ENABLED</code> in its environment because it templates
+<code>client-config.json</code> for the browser at container start. Changing any
+of those is a <strong>re-render and reload</strong>, not just a restart: the file is
+read by the frontend at page load.</p>
+<p><strong><code>enketo-k8s</code>:</strong></p>
+<ol>
+<li>Start <code>redis-main</code> and <code>redis-cache</code> (or verify the relations).</li>
+<li>Block until the <code>odk-enketo</code> relation supplies all three secrets and
+   the base URL.</li>
+<li>Push <code>/etc/secrets/enketo-secret</code> (64 B), <code>enketo-less-secret</code>
+   (32 B), <code>enketo-api-key</code> (128 B) with exact lengths, no newline.</li>
+<li>Render <code>config.json</code> from the template with <code>SECRET</code>,
+   <code>LESS_SECRET</code>, <code>API_KEY</code>, <code>BASE_URL</code>, <code>DOMAIN</code> and the two Redis
+   endpoints.</li>
+<li>Start <code>enketo</code>; gate <code>ActiveStatus</code> on port 8005 accepting
+   connections.</li>
+</ol>
+<p><strong><code>pyxform-k8s</code>:</strong> single service, starts immediately, no dependencies.
+It is the only charm in the group that can reach <code>ActiveStatus</code>
+standalone.</p>
+<h3>Cross-charm bootstrap ordering</h3>
+<pre><code>pyxform-k8s ──(xlsform)──▶ odk-central-k8s ──(odk-enketo)──▶ enketo-k8s
+                                  ▲                                │
+                                  └──── enketo URL sent back ──────┘
+</code></pre>
+<p><code>odk-central-k8s</code> cannot render a complete <code>config.json</code> until BOTH the
+<code>xlsform</code> relation (host/port) and the <code>odk-enketo</code> relation (Enketo's
+URL, which Enketo only sends after it has received the secrets Central
+generated) are settled. That is a genuine two-way bootstrap: Central
+must publish secrets before Enketo can start, and Enketo must publish
+its URL before Central's config is complete.</p>
+<p>Implement it as: Central writes secrets and base URL immediately on
+relation-created; Central starts with <code>enketo.url</code> pointing at a
+placeholder and sets <code>WaitingStatus("waiting for enketo")</code>; on
+receiving Enketo's URL it re-renders and restarts <code>service</code>. Do <strong>not</strong>
+block Central's startup on Enketo — that deadlocks the group.</p>
+<h3>External ports (charm-internal; traefik maps these)</h3>
+<ul>
+<li><code>service</code>: 8383 (HTTP, API)</li>
+<li><code>nginx</code>: 80 (HTTP, serves frontend + proxies <code>/v1</code> to service and
+  <code>/-</code> to Enketo)</li>
+<li><code>enketo</code>: 8005 (HTTP)</li>
+<li><code>pyxform</code>: 80 (HTTP)</li>
+<li><code>redis-main</code>: 6379, <code>redis-cache</code>: 6380 (note the non-default port on
+  the cache instance — upstream's config sets it and Enketo's config
+  expects it)</li>
+</ul>
+<h3>Storage requirements</h3>
+<ul>
+<li><code>odk-central-k8s</code>: none. All state is in PostgreSQL and, once the S3
+  relation exists, the blob store.</li>
+<li><code>enketo-k8s</code>: <code>redis-main-data</code>, <code>type: filesystem</code>,
+  <code>minimum-size: 1G</code>, mounted at <code>/data</code> in the <code>redis-main</code>
+  container. <code>redis-cache</code> is deliberately ephemeral.</li>
+<li><code>pyxform-k8s</code>: none.</li>
+</ul>
+<p>Losing <code>redis-main</code> loses in-flight form and instance state in Enketo.
+Say so in <code>docs/day2-ops.md</code> — it is the one piece of state in the
+group that is not in PostgreSQL or S3.</p>
+<hr />
+<h2>Relation Surface</h2>
+<p>Fetch the published libraries below after <code>charmcraft init</code> and before
+writing any relation-handling code. If a <code>charmcraft fetch-lib</code> command
+returns 404, inspect the charm's Charmhub "Libraries" tab at
+<code>https://charmhub.io/&lt;charm-name&gt;</code> and update this list.</p>
+<pre><code class="language-bash"># PostgreSQL — Central's application database
+charmcraft fetch-lib charms.data_platform_libs.v0.data_interfaces
+
+# Traefik — HTTP ingress
+charmcraft fetch-lib charms.traefik_k8s.v2.ingress
+
+# S3 — blob store for submission attachments and form media
+charmcraft fetch-lib charms.data_platform_libs.v0.s3
+
+# SMTP — account creation and password reset email
+charmcraft fetch-lib charms.smtp_integrator.v0.smtp
+
+# OIDC — Canonical Identity Platform (hydra) provides the oauth interface
+charmcraft fetch-lib charms.hydra.v0.oauth
+
+# TLS certificates (for a self-signed test model)
+charmcraft fetch-lib charms.tls_certificates_interface.v4.tls_certificates
+
+# COS-Lite observability
+charmcraft fetch-lib charms.loki_k8s.v1.loki_push_api
+charmcraft fetch-lib charms.prometheus_k8s.v0.prometheus_scrape
+charmcraft fetch-lib charms.grafana_k8s.v0.grafana_dashboard
+charmcraft fetch-lib charms.tempo_coordinator_k8s.v0.tracing
+</code></pre>
+<h3>Relation matrix</h3>
+<p><strong><code>odk-central-k8s</code>:</strong></p>
+<pre><code class="language-yaml">provides:
+  odk-enketo:
+    interface: odk-enketo
+    limit: 1
+requires:
+  postgresql:
+    interface: postgresql_client
+    limit: 1
+  xlsform:
+    interface: odk-xlsform
+    limit: 1
+  ingress:
+    interface: ingress
+    limit: 1
+  s3:
+    interface: s3
+    limit: 1
+  smtp:
+    interface: smtp
+    limit: 1
+  oauth:
+    interface: oauth
+    limit: 1
+  logging:
+    interface: loki_push_api
+  metrics-endpoint:
+    interface: prometheus_scrape
+  grafana-dashboard:
+    interface: grafana_dashboard
+  tracing:
+    interface: tracing
+    limit: 1
+</code></pre>
+<p><strong><code>enketo-k8s</code>:</strong></p>
+<pre><code class="language-yaml">requires:
+  odk-enketo:
+    interface: odk-enketo
+    limit: 1
+  redis-main:
+    interface: redis
+    limit: 1
+    optional: true
+  redis-cache:
+    interface: redis
+    limit: 1
+    optional: true
+  logging:
+    interface: loki_push_api
+  metrics-endpoint:
+    interface: prometheus_scrape
+  grafana-dashboard:
+    interface: grafana_dashboard
+</code></pre>
+<p><strong><code>pyxform-k8s</code>:</strong></p>
+<pre><code class="language-yaml">provides:
+  xlsform:
+    interface: odk-xlsform
+requires:
+  logging:
+    interface: loki_push_api
+  metrics-endpoint:
+    interface: prometheus_scrape
+</code></pre>
+<p><code>pyxform</code> has no ingress: it is reached only by Central, in-cluster.
+Do not expose it.</p>
+<h3>Composition model for integration tests</h3>
+<pre><code class="language-bash">juju deploy ./odk-central-k8s_amd64.charm odk-central-k8s \
+  --resource service-image=ghcr.io/getodk/central-service:&lt;Q3&gt; \
+  --resource nginx-image=ghcr.io/getodk/central-nginx:&lt;Q3&gt; --trust
+juju deploy ./enketo-k8s_amd64.charm enketo-k8s \
+  --resource enketo-image=ghcr.io/enketo/enketo:&lt;Q4&gt; \
+  --resource redis-image=redis:8.6.4
+juju deploy ./pyxform-k8s_amd64.charm pyxform-k8s \
+  --resource pyxform-image=ghcr.io/getodk/pyxform-http:&lt;Q4&gt;
+
+juju deploy postgresql-k8s --channel 16/stable --trust
+juju deploy traefik-k8s --channel latest/stable --trust
+juju deploy s3-integrator --channel latest/stable
+juju deploy smtp-integrator --channel latest/stable
+
+juju integrate odk-central-k8s postgresql-k8s
+juju integrate odk-central-k8s pyxform-k8s
+juju integrate odk-central-k8s enketo-k8s
+juju integrate odk-central-k8s traefik-k8s
+juju integrate odk-central-k8s s3-integrator
+juju integrate odk-central-k8s smtp-integrator
+
+# COS-Lite (optional in Phases 1-9, required in Phase 9)
+juju integrate odk-central-k8s loki-k8s
+juju integrate odk-central-k8s prometheus-k8s
+juju integrate odk-central-k8s grafana-k8s
+juju integrate odk-central-k8s tempo-coordinator-k8s
+juju integrate enketo-k8s loki-k8s
+juju integrate pyxform-k8s loki-k8s
+</code></pre>
+<hr />
+<h2>Configuration &amp; Secret Surface</h2>
+<h3><code>odk-central-k8s</code> config</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>external-hostname</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>Public FQDN (Q6). Overrides the ingress-supplied hostname when set. Central will not work with a bare IP</td>
+</tr>
+<tr>
+<td><code>sysadmin-email</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>Address shown to users as the system contact; also used as the Let's Encrypt contact upstream, unused here</td>
+</tr>
+<tr>
+<td><code>email-from</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>Envelope From for outbound mail. Defaults to <code>no-reply@&lt;external-hostname&gt;</code> when empty</td>
+</tr>
+<tr>
+<td><code>session-lifetime</code></td>
+<td>int</td>
+<td><code>86400</code></td>
+<td>Web session lifetime in seconds</td>
+</tr>
+<tr>
+<td><code>db-pool-size</code></td>
+<td>int</td>
+<td><code>10</code></td>
+<td>Per-worker PostgreSQL connection pool size</td>
+</tr>
+<tr>
+<td><code>log-level</code></td>
+<td>string</td>
+<td><code>INFO</code></td>
+<td>Workload log level: <code>DEBUG</code>, <code>INFO</code>, <code>WARN</code>, <code>ERROR</code></td>
+</tr>
+<tr>
+<td><code>oidc-enabled</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Enable OpenID Connect. <strong>Disables password auth and <code>POST /v1/session</code> entirely</strong> — see Phase 8</td>
+</tr>
+<tr>
+<td><code>oidc-issuer-url</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>OIDC issuer URL. Ignored when the <code>oauth</code> relation is present, which supplies it</td>
+</tr>
+<tr>
+<td><code>oidc-client-id</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>OIDC client ID (public, non-sensitive). Ignored when the <code>oauth</code> relation is present</td>
+</tr>
+<tr>
+<td><code>s3-bucket-name</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>Override the bucket name supplied by the <code>s3</code> relation</td>
+</tr>
+<tr>
+<td><code>s3-upload-interval-minutes</code></td>
+<td>int</td>
+<td><code>15</code></td>
+<td>How often the charm triggers the pending-blob upload job</td>
+</tr>
+<tr>
+<td><code>error-reporting-dsn</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>Operator's own Sentry DSN. Empty means all <code>SENTRY_*</code> values are blanked — upstream's shipped defaults are ODK's own project and must never be inherited (Q10)</td>
+</tr>
+<tr>
+<td><code>frontend-analytics-enabled</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Whether Central offers the upstream usage-reporting prompt to administrators</td>
+</tr>
+</tbody>
+</table>
+<h3><code>enketo-k8s</code> config</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>offline-enabled</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Allow offline-capable web forms (service worker)</td>
+</tr>
+<tr>
+<td><code>payload-limit</code></td>
+<td>string</td>
+<td><code>1mb</code></td>
+<td>Maximum submission payload accepted by Enketo</td>
+</tr>
+<tr>
+<td><code>text-field-character-limit</code></td>
+<td>int</td>
+<td><code>1000000</code></td>
+<td>Upstream default; lower it for constrained deployments</td>
+</tr>
+<tr>
+<td><code>exclude-non-relevant</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Do not submit values for questions hidden by relevance logic</td>
+</tr>
+<tr>
+<td><code>redis-main-maxmemory</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>Optional <code>maxmemory</code> for the in-charm durable instance</td>
+</tr>
+<tr>
+<td><code>redis-cache-maxmemory</code></td>
+<td>string</td>
+<td><code>256mb</code></td>
+<td><code>maxmemory</code> for the in-charm cache instance</td>
+</tr>
+<tr>
+<td><code>log-level</code></td>
+<td>string</td>
+<td><code>INFO</code></td>
+<td>Workload log level</td>
+</tr>
+</tbody>
+</table>
+<h3><code>pyxform-k8s</code> config</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workers</code></td>
+<td>int</td>
+<td><code>2</code></td>
+<td>HTTP worker processes</td>
+</tr>
+<tr>
+<td><code>conversion-timeout</code></td>
+<td>int</td>
+<td><code>60</code></td>
+<td>Seconds before an XLSForm conversion is abandoned</td>
+</tr>
+<tr>
+<td><code>log-level</code></td>
+<td>string</td>
+<td><code>INFO</code></td>
+<td>Workload log level</td>
+</tr>
+</tbody>
+</table>
+<h3>Secret surface (Juju secrets — never <code>config:</code>)</h3>
+<p>Secrets with no operator-supplied value are generated by
+<code>odk-central-k8s</code> on first <code>install</code>. Operator-supplied ones are marked
+<strong>OPERATOR-PROVIDED</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Juju secret label</th>
+<th>Contents</th>
+<th>Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>odk-enketo-api-key</code></td>
+<td>Exactly <strong>128</strong> characters</td>
+<td>Generated</td>
+<td>Shared with Enketo over the relation; also written into Central's own <code>enketo.apiKey</code></td>
+</tr>
+<tr>
+<td><code>odk-enketo-secret</code></td>
+<td>Exactly <strong>64</strong> characters</td>
+<td>Generated</td>
+<td>Enketo's encryption key</td>
+</tr>
+<tr>
+<td><code>odk-enketo-less-secret</code></td>
+<td>Exactly <strong>32</strong> characters</td>
+<td>Generated</td>
+<td>Enketo's "less secure" encryption key</td>
+</tr>
+<tr>
+<td><code>odk-admin-email</code></td>
+<td>Email string</td>
+<td><strong>OPERATOR-PROVIDED</strong> (Q7)</td>
+<td>Consumed by the <code>create-admin</code> action</td>
+</tr>
+<tr>
+<td><code>odk-admin-password</code></td>
+<td>Password string</td>
+<td>Generated if absent</td>
+<td>Returned once by <code>create-admin</code>; never logged</td>
+</tr>
+<tr>
+<td><code>odk-oidc-client-secret</code></td>
+<td>OIDC client secret</td>
+<td><strong>OPERATOR-PROVIDED</strong></td>
+<td>Only when <code>oidc-enabled=true</code> and no <code>oauth</code> relation</td>
+</tr>
+<tr>
+<td>—</td>
+<td>S3 access/secret key</td>
+<td><code>s3</code> relation</td>
+<td>Never a Juju secret owned by this charm</td>
+</tr>
+<tr>
+<td>—</td>
+<td>SMTP user/password</td>
+<td><code>smtp</code> relation</td>
+<td>Never a Juju secret owned by this charm</td>
+</tr>
+</tbody>
+</table>
+<p>Generate with <code>secrets.token_urlsafe()</code> trimmed (or
+<code>secrets.choice</code> over an explicit alphabet) to the <strong>exact</strong> lengths
+above, then assert <code>len(value) == N</code> before storing. Store via
+<code>self.app.add_secret({...}, label=...)</code>; on later hooks retrieve rather
+than regenerate.</p>
+<pre><code class="language-bash">SECRET_ID=$(juju secret add odk-admin-email email=&lt;Q7-value&gt; --format json | jq -r .secret-id)
+juju grant-secret $SECRET_ID odk-central-k8s
+juju config odk-central-k8s admin-email-secret=$SECRET_ID
+</code></pre>
+<h3>Relation and config → <code>config.json</code> mapping</h3>
+<p>Central reads a JSON config file, not environment variables. The charm
+renders it; upstream's <code>files/service/config.json.template</code> is the
+authoritative shape.</p>
+<table>
+<thead>
+<tr>
+<th><code>config.json</code> path</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>database.host</code> / <code>.user</code> / <code>.password</code> / <code>.database</code></td>
+<td><code>postgresql</code> relation</td>
+</tr>
+<tr>
+<td><code>database.maximumPoolSize</code></td>
+<td><code>db-pool-size</code> config</td>
+</tr>
+<tr>
+<td><code>email.serviceAccount</code></td>
+<td><code>email-from</code> config</td>
+</tr>
+<tr>
+<td><code>email.transportOpts.host</code> / <code>.port</code> / <code>.secure</code> / <code>.auth.*</code></td>
+<td><code>smtp</code> relation</td>
+</tr>
+<tr>
+<td><code>sessionLifetime</code></td>
+<td><code>session-lifetime</code> config</td>
+</tr>
+<tr>
+<td><code>xlsform.host</code> / <code>.port</code></td>
+<td><code>xlsform</code> relation (pyxform-k8s)</td>
+</tr>
+<tr>
+<td><code>enketo.url</code></td>
+<td><code>odk-enketo</code> relation (Enketo's in-cluster URL + <code>/-</code>)</td>
+</tr>
+<tr>
+<td><code>enketo.apiKey</code></td>
+<td>Juju secret <code>odk-enketo-api-key</code></td>
+</tr>
+<tr>
+<td><code>env.domain</code></td>
+<td>ingress URL or <code>external-hostname</code> config</td>
+</tr>
+<tr>
+<td><code>env.sysadminAccount</code></td>
+<td><code>sysadmin-email</code> config</td>
+</tr>
+<tr>
+<td><code>oidc.enabled</code></td>
+<td><code>oidc-enabled</code> config</td>
+</tr>
+<tr>
+<td><code>oidc.issuerUrl</code> / <code>.clientId</code></td>
+<td><code>oauth</code> relation, else config</td>
+</tr>
+<tr>
+<td><code>oidc.clientSecret</code></td>
+<td><code>oauth</code> relation, else Juju secret</td>
+</tr>
+<tr>
+<td><code>external.sentry.*</code></td>
+<td><code>error-reporting-dsn</code> config; <strong>blank by default</strong></td>
+</tr>
+<tr>
+<td><code>external.s3blobStore.server</code> / <code>.accessKey</code> / <code>.secretKey</code> / <code>.bucketName</code></td>
+<td><code>s3</code> relation, bucket overridable by config</td>
+</tr>
+</tbody>
+</table>
+<h3>nginx container environment</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DOMAIN</code></td>
+<td>ingress URL host or <code>external-hostname</code></td>
+</tr>
+<tr>
+<td><code>SSL_TYPE</code></td>
+<td>hardcoded <code>upstream</code></td>
+</tr>
+<tr>
+<td><code>HTTPS_PORT</code></td>
+<td>hardcoded <code>443</code></td>
+</tr>
+<tr>
+<td><code>OIDC_ENABLED</code></td>
+<td><code>oidc-enabled</code> config</td>
+</tr>
+<tr>
+<td><code>SENTRY_*</code> / <code>SENTRY_DSN_FRONTEND</code></td>
+<td>blanked unless <code>error-reporting-dsn</code> set</td>
+</tr>
+</tbody>
+</table>
+<h3>Enketo <code>config.json</code> mapping</h3>
+<table>
+<thead>
+<tr>
+<th><code>config.json</code> path</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>encryption key</code></td>
+<td><code>odk-enketo-secret</code> via relation</td>
+</tr>
+<tr>
+<td><code>less secure encryption key</code></td>
+<td><code>odk-enketo-less-secret</code> via relation</td>
+</tr>
+<tr>
+<td><code>linked form and data server.api key</code></td>
+<td><code>odk-enketo-api-key</code> via relation</td>
+</tr>
+<tr>
+<td><code>linked form and data server.server url</code></td>
+<td>base URL via relation</td>
+</tr>
+<tr>
+<td><code>linked form and data server.authentication.url</code></td>
+<td><code>&lt;base-url&gt;/login?next={RETURNURL}</code></td>
+</tr>
+<tr>
+<td><code>redis.main.host</code> / <code>.port</code></td>
+<td>localhost:6379, or <code>redis-main</code> relation</td>
+</tr>
+<tr>
+<td><code>redis.cache.host</code> / <code>.port</code></td>
+<td>localhost:6380, or <code>redis-cache</code> relation</td>
+</tr>
+<tr>
+<td><code>offline enabled</code>, <code>payload limit</code>, <code>exclude non-relevant</code>, <code>text field character limit</code></td>
+<td>charm config</td>
+</tr>
+<tr>
+<td><code>support.email</code></td>
+<td><code>sysadmin-email</code> forwarded over the relation</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Phase 0 — Pre-flight &amp; Answers</h2>
+<p><strong>Goals:</strong> Verify the dev box is ready; print a build manifest; block
+on any missing prerequisite before writing a line of charm code.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>
+<p>Verify tool versions:
+   <code>bash
+   juju version          # must be &gt;= 3.6
+   charmcraft version    # must be &gt;= 4.0
+   git --version
+   python3 --version     # must be &gt;= 3.12
+   uv --version          # install: curl -LsSf https://astral.sh/uv/install.sh | sh</code></p>
+</li>
+<li>
+<p>Verify the k8s controller (Q2) and prefer Canonical Kubernetes:
+   <code>bash
+   juju controllers --format=yaml
+   juju switch &lt;Q2-controller&gt;
+   juju status --format=yaml | head -5</code></p>
+</li>
+<li>
+<p>Verify the GitHub repository exists or can be created at
+   <code>&lt;Q1&gt;/odk-central-operators</code>. If it does not exist, create it empty.</p>
+</li>
+<li>
+<p>Confirm every image tag resolves before pinning it:
+   <code>bash
+   for img in "getodk/central-service:&lt;Q3&gt;" "getodk/central-nginx:&lt;Q3&gt;" \
+              "getodk/pyxform-http:&lt;Q4-pyxform&gt;" "enketo/enketo:&lt;Q4-enketo&gt;"; do
+     repo="${img%:*}"; tag="${img##*:}"
+     tok=$(curl -s "https://ghcr.io/token?scope=repository:$repo:pull&amp;service=ghcr.io" | jq -r .token)
+     code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $tok" \
+       "https://ghcr.io/v2/$repo/manifests/$tag" \
+       -H "Accept: application/vnd.oci.image.index.v1+json")
+     echo "$img -&gt; $code"   # 200 required
+   done</code></p>
+</li>
+<li>
+<p>Download the upstream reference files for the Q3 tag into <code>hack/upstream/</code>
+   and keep them in the repo as the source of truth for later phases:
+   <code>bash
+   mkdir -p hack/upstream
+   base=https://raw.githubusercontent.com/getodk/central/&lt;Q3&gt;
+   for f in docker-compose.yml .env.template enketo.dockerfile \
+            files/service/config.json.template \
+            files/enketo/config.json.template \
+            files/enketo/start-enketo.sh \
+            files/enketo/redis-enketo-main.conf \
+            files/enketo/redis-enketo-cache.conf \
+            files/nginx/odk.conf.template \
+            files/nginx/client-config.json.template; do
+     curl -sfSL "$base/$f" -o "hack/upstream/$(basename $f)" || echo "MISSING: $f"
+   done</code>
+   If any file is missing at that tag, the upstream layout has changed
+   — re-derive the component map from what is actually there before
+   continuing. Upstream files always win over this document.</p>
+</li>
+<li>
+<p>Print a one-page build manifest summarising Q1–Q10 and the installed
+   tool versions. Proceed immediately if unattended.</p>
+</li>
+</ol>
+<p><strong>Commit:</strong> none — Phase 0 is pre-work only.</p>
+<hr />
+<h2>Phase 1 — Repository Scaffold</h2>
+<p><strong>Goals:</strong> A well-structured multi-charm open-source repository with
+all OSS hygiene files in place; CI green on the empty scaffold.</p>
+<p><strong>Layout:</strong></p>
+<pre><code>odk-central-operators/
+  charms/
+    odk-central-k8s/
+    enketo-k8s/
+    pyxform-k8s/
+  lib/                     # shared: the two ODK charm libraries live
+                           # in each charm's own lib/ (symlinked from here)
+  hack/upstream/           # Phase 0 reference files
+  docs/
+  tests/integration/       # group-level tests, not per-charm
+  .github/
+  mkdocs.yml
+  pyproject.toml           # workspace root; each charm has its own too
+</code></pre>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>
+<p>Clone (or init) <code>&lt;Q1&gt;/odk-central-operators</code> and work on <code>main</code>.</p>
+</li>
+<li>
+<p>Create root files:</p>
+</li>
+</ol>
+<p><strong><code>LICENSE</code></strong> — Apache 2.0 from
+   https://www.apache.org/licenses/LICENSE-2.0.txt, with
+   <code>Copyright 2026 Canonical Ltd.</code></p>
+<p><strong><code>README.md</code></strong> — structure:
+   ```
+   # odk-central-operators</p>
+<p>Juju charms for <a href="https://getodk.org/">ODK Central</a>, an open-source
+   platform for collecting, managing and using survey and field data.</p>
+<p>## What is ODK Central?
+   [two sentences from the upstream docs]</p>
+<p>## The charm group
+   [table: odk-central-k8s / enketo-k8s / pyxform-k8s, what each runs]</p>
+<p>## Quick start
+   [juju deploy commands, 15 lines max]</p>
+<p>## Relation matrix
+   [table of all relations across all three charms]</p>
+<p>## Day-2 operations
+   [table of all actions with brief descriptions]</p>
+<p>## Observability
+   [COS-Lite wiring paragraph]</p>
+<p>## Contributing
+   See CONTRIBUTING.md.
+   ```</p>
+<p><strong><code>CONTRIBUTING.md</code></strong> — <code>uv</code> dev setup, per-charm unit tests
+   (<code>uv run pytest charms/&lt;name&gt;/tests/unit</code>), group integration tests
+   (<code>uv run pytest tests/integration</code>), pre-commit, Conventional
+   Commits. State explicitly that both the charms and the upstream
+   workload are Apache-2.0 — unusually for this software category
+   there is no licence divergence and no enterprise-gated code in the
+   deployed images.</p>
+<p><strong><code>CODE_OF_CONDUCT.md</code></strong> — Contributor Covenant 2.1.</p>
+<p><strong><code>SECURITY.md</code></strong> — report via <code>security@ubuntu.com</code>, response
+   within 5 business days, coordinated disclosure; reference
+   https://ubuntu.com/security/disclosure-policy. Add a line pointing
+   upstream reports at https://github.com/getodk/central/security.</p>
+<p><strong><code>CHANGELOG.md</code></strong> — Keep-a-Changelog, seeded with <code>## [Unreleased]</code>.</p>
+<ol>
+<li>
+<p>Create <code>.github/</code>:</p>
+</li>
+<li>
+<p><code>ISSUE_TEMPLATE/bug_report.md</code> — fields: which charm, ODK Central
+     version, charm revision, Juju version, k8s flavour, reproduction,
+     expected vs actual.</p>
+</li>
+<li><code>ISSUE_TEMPLATE/feature_request.md</code>.</li>
+<li><code>PULL_REQUEST_TEMPLATE.md</code> — tests added, CHANGELOG updated,
+     conventional commit, <code>juju status</code> attached if
+     integration-relevant.</li>
+<li>
+<p><code>workflows/ci.yml</code> — a matrix over the three charms for lint and
+     unit tests, plus a single integration job gated on
+     <code>push</code>/<code>workflow_dispatch</code>:
+     ```yaml
+     name: CI
+     on:
+       push:
+         branches: [main]
+       pull_request:</p>
+<p>jobs:
+   lint:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - uses: astral-sh/setup-uv@v5
+       - run: uv run pre-commit run --all-files</p>
+<p>unit-tests:
+     runs-on: ubuntu-latest
+     strategy:
+       matrix:
+         charm: [odk-central-k8s, enketo-k8s, pyxform-k8s]
+     steps:
+       - uses: actions/checkout@v4
+       - uses: astral-sh/setup-uv@v5
+       - run: uv run pytest charms/${{ matrix.charm }}/tests/unit -v</p>
+<p>integration-tests:
+     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v4
+       - uses: canonical/setup-lxd@v0
+       - uses: charmed-kubernetes/actions-operator@main
+         with:
+           provider: microk8s
+           channel: 1.32-strict/stable
+       - uses: astral-sh/setup-uv@v5
+       - run: uv run pytest tests/integration -v
+ <code>``
+ (CI runners use microk8s because Canonical Kubernetes is not yet a
+ packaged GitHub Actions provider; the dev-box build still uses</code>k8s<code>per Q2. Note the discrepancy in</code>CONTRIBUTING.md<code>.)
+   -</code>workflows/release.yml<code>—</code>release-please<code>,</code>release-type: simple<code>.
+   -</code>workflows/security.yml<code>—</code>zizmor<code>on the workflows, weekly cron,
+ plus</code>dependency-review<code>on PRs.
+   -</code>workflows/docs.yml<code>—</code>mkdocs gh-deploy --force<code>on push to main.
+   -</code>dependabot.yml<code>—</code>pip<code>and</code>github-actions<code>, weekly, with a</code>directory` entry per charm.</p>
+</li>
+<li>
+<p>Root <code>pyproject.toml</code> declaring a <code>uv</code> workspace over the three
+   charm directories, plus shared dev dependencies (<code>pytest</code>,
+   <code>pytest-asyncio</code>, <code>jubilant</code>, <code>ops[testing]</code>, <code>mypy</code>, <code>ruff</code>).
+   Ruff <code>line-length = 99</code>, <code>target-version = "py312"</code>,
+   <code>select = ["E","F","W","I","N","UP","B","ANN"]</code>. Mypy <code>strict</code>.</p>
+</li>
+<li>
+<p><code>.pre-commit-config.yaml</code> with <code>ruff</code>, <code>ruff-format</code>, <code>mypy
+   --strict</code>, <code>yamllint</code>, <code>actionlint</code>.</p>
+</li>
+<li>
+<p>Docs skeleton and <code>mkdocs.yml</code>:
+   <code>docs/
+     index.md            — what the group is, and why three charms
+     quickstart.md       — deploy to first submission
+     architecture.md     — the component map and bootstrap ordering
+     configuration.md    — every config key of all three charms
+     relations.md        — what to deploy and integrate, and why
+     day2-ops.md         — backup, restore, upgrade, secret rotation
+     observability.md    — COS-Lite wiring and shipped dashboards
+     migrating-from-compose.md — moving an existing compose deploy
+     contributing.md</code></p>
+</li>
+<li>
+<p><code>charms/*/tests/unit/.gitkeep</code> and <code>tests/integration/.gitkeep</code>.</p>
+</li>
+<li>
+<p>Commit:
+   ```bash
+   git add .
+   git commit -m "chore: initial OSS repository scaffold</p>
+</li>
+</ol>
+<p>Apache 2.0 licence, contributing guides, code of conduct, security
+   policy, GitHub Actions CI matrix over three charms, release-please,
+   zizmor, dependabot, pre-commit with ruff+mypy+yamllint+actionlint,
+   mkdocs-material docs skeleton, uv workspace."
+   git push -u origin main
+   ```</p>
+<p><strong>Definition of done:</strong> <code>git push</code> succeeds; CI runs; lint and the
+three unit-test matrix legs pass with zero tests collected.</p>
+<hr />
+<h2>Phase 2 — Charm Scaffolding</h2>
+<p><strong>Goals:</strong> Three compilable, packable charms with correct
+<code>charmcraft.yaml</code> files. No relations wired; no workload started.
+<code>charmcraft pack</code> produces three <code>.charm</code> files.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>
+<p>For each charm, run
+   <code>charmcraft init --profile kubernetes --name &lt;entity&gt;</code> in a scratch
+   directory and merge the result into <code>charms/&lt;entity&gt;/</code>. Discard the
+   generated <code>README.md</code>.</p>
+</li>
+<li>
+<p>Write each <code>charmcraft.yaml</code> in full — <code>name</code>, <code>type: charm</code>,
+   <code>title</code>, <code>summary</code>, <code>description</code>, <code>links</code> (documentation, issues,
+   source, website <code>https://docs.getodk.org</code>), <code>bases</code>
+   (ubuntu 24.04 build-on/run-on), <code>containers</code>, <code>resources</code>,
+   <code>storage</code>, the relation matrix from the Relation Surface section,
+   the full <code>config:</code> block from the Configuration &amp; Secret Surface
+   section, and the <code>actions:</code> block below.</p>
+</li>
+</ol>
+<p><code>odk-central-k8s</code> resources:
+   <code>yaml
+   resources:
+     service-image:
+       type: oci-image
+       description: ODK Central API service
+       upstream-source: ghcr.io/getodk/central-service:&lt;Q3&gt;
+     nginx-image:
+       type: oci-image
+       description: ODK Central nginx + built frontend
+       upstream-source: ghcr.io/getodk/central-nginx:&lt;Q3&gt;</code></p>
+<p><code>enketo-k8s</code> resources: <code>enketo-image</code>
+   (<code>ghcr.io/enketo/enketo:&lt;Q4&gt;</code>) and <code>redis-image</code> (<code>redis:8.6.4</code>,
+   used by both Redis containers).</p>
+<p><code>pyxform-k8s</code> resources: <code>pyxform-image</code>
+   (<code>ghcr.io/getodk/pyxform-http:&lt;Q4&gt;</code>).</p>
+<p><code>odk-central-k8s</code> actions:
+   <code>yaml
+   actions:
+     create-admin:
+       description: |
+         Create the initial web user from the odk-admin-email Juju
+         secret and promote it to administrator. Returns the generated
+         password once; it is not retrievable afterwards.
+     promote-user:
+       description: Grant an existing user the administrator role.
+       params:
+         email: {type: string, description: Address of the user to promote.}
+     reset-password:
+       description: Reset a user's password and return the new value once.
+       params:
+         email: {type: string, description: Address of the user.}
+     rotate-enketo-secrets:
+       description: |
+         Regenerate all three Enketo shared secrets, republish them over
+         the odk-enketo relation, and restart both workloads. All
+         in-progress web form sessions are invalidated.
+     run-migrations:
+       description: Run database migrations manually (normally automatic on refresh).
+     upload-pending-blobs:
+       description: |
+         Upload submission attachments still held in PostgreSQL to the
+         S3 blob store. No-op without an s3 relation.
+     purge-deleted:
+       description: Permanently remove soft-deleted forms and submissions.
+       params:
+         force: {type: boolean, default: false, description: Skip the retention window.}
+     backup:
+       description: pg_dump the Central database to the S3 blob store.
+       params:
+         destination: {type: string, description: S3 path prefix for the backup output.}
+     restore:
+       description: Restore the Central database from a backup snapshot.
+       params:
+         source: {type: string, description: S3 path prefix of the backup.}</code></p>
+<p><code>enketo-k8s</code> actions: <code>flush-cache</code> (flush the cache Redis instance
+   only, never the durable one) and <code>redis-info</code> (return <code>INFO</code> output
+   from both instances for diagnosis).</p>
+<p><code>pyxform-k8s</code> actions: <code>convert</code> (accept an XLSForm as a base64
+   param and return the XForm — a diagnostic, not a production path).</p>
+<ol>
+<li>
+<p>Run <code>charmcraft fetch-lib</code> for every library in the Relation Surface
+   section, in each charm that needs it. Commit the <code>lib/</code> trees.</p>
+</li>
+<li>
+<p>Write the two ODK charm libraries as skeletons with full docstrings,
+   <code>LIBID</code>/<code>LIBAPI</code>/<code>LIBPATCH</code>, provider and requirer classes, and
+   custom events — but with <code>pass</code> bodies for the data handling, which
+   Phases 5 and 6 fill in. Getting the API shape fixed now stops the
+   two charms drifting apart later.</p>
+</li>
+<li>
+<p>Write a minimal <code>src/charm.py</code> per charm that imports <code>ops</code>,
+   defines the charm class, handles <code>install</code>, <code>config-changed</code> and
+   <code>upgrade-charm</code> as stubs, and sets
+   <code>ops.WaitingStatus("waiting for relations")</code> on startup.</p>
+</li>
+<li>
+<p>Pack all three:
+   <code>bash
+   for c in odk-central-k8s enketo-k8s pyxform-k8s; do
+     (cd charms/$c &amp;&amp; charmcraft pack)
+   done
+   ls -la charms/*/*.charm</code></p>
+</li>
+<li>
+<p>Commit:
+   ```bash
+   git commit -m "feat(charms): charmcraft scaffolds for all three charms</p>
+</li>
+</ol>
+<p>charmcraft.yaml for odk-central-k8s, enketo-k8s and pyxform-k8s with
+   full container, resource, storage, relation, config and action
+   surfaces. Fetched charm libs. Skeletons for the odk_enketo and
+   xlsform libraries. charmcraft pack produces three valid artefacts."
+   git push -u origin main
+   ```</p>
+<p><strong>Definition of done:</strong> three <code>.charm</code> files exist; every
+<code>uv run pytest charms/*/tests/unit</code> leg passes.</p>
+<hr />
+<h2>Phase 3 — <code>pyxform-k8s</code> End to End</h2>
+<p><strong>Goals:</strong> The simplest charm in the group, complete: workload running,
+<code>xlsform</code> interface implemented and published, unit tests, deployed and
+<code>active/idle</code>. Doing this charm first fixes the library conventions the
+other two follow.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>
+<p>Implement the Pebble layer for the <code>pyxform</code> container. Verify the
+   image's entrypoint first:
+   <code>bash
+   docker manifest inspect ghcr.io/getodk/pyxform-http:&lt;Q4&gt; &gt;/dev/null
+   docker create --name tmp-pyxform ghcr.io/getodk/pyxform-http:&lt;Q4&gt;
+   docker inspect tmp-pyxform --format='{{json .Config.Entrypoint}} {{json .Config.Cmd}}'
+   docker rm tmp-pyxform</code>
+   The upstream compose runs the image with no command override, so
+   the Pebble <code>command</code> is the image's own entrypoint plus whatever
+   worker/timeout flags <code>workers</code> and <code>conversion-timeout</code> config map
+   to. If the image exposes no such flags, apply them as environment
+   variables and record what you found in <code>docs/configuration.md</code>.</p>
+</li>
+<li>
+<p>Implement <code>XlsformProvider</code> in
+   <code>lib/charms/pyxform_k8s/v0/xlsform.py</code>: on <code>relation-joined</code> and on
+   any change to the service's bound address, write <code>host</code> and <code>port</code>
+   into the application relation databag; emit <code>XlsformReadyEvent</code> on
+   the requirer side.</p>
+</li>
+<li>
+<p>Gate <code>ActiveStatus</code> on a real conversion, not a port check: POST a
+   two-row minimal XLSForm to the service and assert a valid XForm
+   comes back. Keep that fixture in
+   <code>charms/pyxform-k8s/tests/data/minimal.xlsx</code>.</p>
+</li>
+<li>
+<p>Unit tests: service starts on <code>pebble-ready</code>; relation databag
+   populated on join; status blocked when the conversion probe fails.</p>
+</li>
+<li>
+<p>Smoke test:
+   <code>bash
+   juju add-model odk-test
+   juju deploy ./charms/pyxform-k8s/pyxform-k8s_amd64.charm \
+     --resource pyxform-image=ghcr.io/getodk/pyxform-http:&lt;Q4&gt;
+   juju wait-for application pyxform-k8s --query='status=="active"' --timeout=10m</code></p>
+</li>
+<li>
+<p>Commit: <code>feat(pyxform): workload, xlsform interface, conversion probe</code>.</p>
+</li>
+</ol>
+<p><strong>Definition of done:</strong> <code>pyxform-k8s</code> reaches <code>active/idle</code> standalone;
+the conversion probe passes; unit tests green.</p>
+<hr />
+<h2>Phase 4 — <code>odk-central-k8s</code> Single-Container Baseline</h2>
+<p><strong>Goals:</strong> The Central API service runs under Pebble against a
+PostgreSQL relation; migrations run before the service starts; the
+charm reports <code>active/idle</code>; <code>/v1/version.json</code> answers.</p>
+<p>Phase 4 deliberately excludes nginx, Enketo, S3, SMTP and OIDC. Render
+<code>config.json</code> with the <code>xlsform</code> stanza from the Phase 3 relation, an
+<code>enketo.url</code> placeholder, empty <code>s3blobStore</code>, blanked <code>sentry</code>, and a
+null email transport. Central starts without a working mail transport;
+it only fails when something tries to send.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>
+<p>Determine where the image expects its config and how it starts:
+   <code>bash
+   docker create --name tmp-svc ghcr.io/getodk/central-service:&lt;Q3&gt;
+   docker inspect tmp-svc --format='{{json .Config.Entrypoint}} {{json .Config.Cmd}} {{json .Config.WorkingDir}}'
+   docker export tmp-svc | tar -t | grep -E 'start-odk|config/(local|default)\.json' | head
+   docker rm tmp-svc</code>
+   <code>hack/upstream/config.json.template</code> gives the required shape;
+   the image's own <code>start-odk.sh</code> gives the path and the render step.
+   <strong>The image's files are authoritative</strong> — this document is not.</p>
+</li>
+<li>
+<p>Implement <code>_render_service_config()</code> returning the full
+   <code>config.json</code> dict from the mapping table above, and push it with
+   <code>container.push(path, json.dumps(cfg, indent=2), make_dirs=True)</code>.</p>
+</li>
+<li>
+<p>Pebble layer for the <code>service</code> container:
+   <code>python
+   ops.pebble.Layer({
+       "summary": "odk central service",
+       "services": {
+           "migrations": {
+               "override": "replace",
+               "summary": "database migrations (one-shot)",
+               "command": "&lt;verified migration command&gt;",
+               "startup": "disabled",
+               "environment": self._service_env(),
+           },
+           "service": {
+               "override": "replace",
+               "summary": "ODK Central API",
+               "command": "&lt;verified start command&gt;",
+               "startup": "disabled",
+               "environment": self._service_env(),
+               "on-failure": "restart",
+           },
+       },
+       "checks": {
+           "api-up": {
+               "override": "replace",
+               "level": "ready",
+               "period": "15s",
+               "threshold": 3,
+               "http": {"url": "http://localhost:8383/v1/version.json"},
+           },
+       },
+   })</code></p>
+</li>
+<li>
+<p>Startup sequence, driven from a single <code>_reconcile()</code> that every
+   hook calls (do not scatter logic across per-relation handlers):</p>
+</li>
+<li>Return early with <code>WaitingStatus</code> if the <code>postgresql</code> relation is
+      incomplete.</li>
+<li>Generate the three Enketo secrets if absent (they are needed here
+      even before <code>enketo-k8s</code> exists, because <code>enketo.apiKey</code> is part
+      of Central's own config).</li>
+<li>Render and push <code>config.json</code>.</li>
+<li><code>container.start("migrations")</code>; poll until the service exits;
+      non-zero exit → <code>BlockedStatus("database migration failed")</code> and
+      return.</li>
+<li>Start <code>service</code>; wait for the <code>api-up</code> check to pass.</li>
+<li>
+<p><code>ActiveStatus("api ready; awaiting enketo")</code> until the
+      <code>odk-enketo</code> relation is settled.</p>
+</li>
+<li>
+<p>Unit tests: postgres relation complete → migrations run then service
+   starts; postgres incomplete → Waiting; migration non-zero exit →
+   Blocked; secrets generated once and reused on re-run; secret lengths
+   are exactly 128/64/32.</p>
+</li>
+<li>
+<p>Smoke test:
+   <code>bash
+   juju deploy ./charms/odk-central-k8s/odk-central-k8s_amd64.charm \
+     --resource service-image=ghcr.io/getodk/central-service:&lt;Q3&gt; \
+     --resource nginx-image=ghcr.io/getodk/central-nginx:&lt;Q3&gt; --trust
+   juju deploy postgresql-k8s --channel 16/stable --trust
+   juju integrate odk-central-k8s postgresql-k8s
+   juju integrate odk-central-k8s pyxform-k8s
+   juju wait-for application odk-central-k8s --query='status=="active"' --timeout=15m
+   juju ssh --container service odk-central-k8s/0 \
+     curl -s http://localhost:8383/v1/version.json</code></p>
+</li>
+<li>
+<p>Commit: <code>feat(central): postgresql relation, config render, migrations, api service</code>.</p>
+</li>
+</ol>
+<p><strong>Definition of done:</strong> <code>active/idle</code>; <code>/v1/version.json</code> returns the
+Q3 version; unit tests green.</p>
+<hr />
+<h2>Phase 5 — nginx, Frontend and Ingress</h2>
+<p><strong>Goals:</strong> The <code>nginx</code> container serves the built frontend and proxies
+the API; <code>traefik-k8s</code> fronts it; the web UI loads in a browser.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Wire <code>IngressPerAppRequirer</code> from
+   <code>charms.traefik_k8s.v2.ingress</code>, requesting port 80 (nginx), not</li>
+<li>
+<p>Central's frontend and API must be same-origin.</p>
+</li>
+<li>
+<p>nginx Pebble layer with the environment from the nginx table above.
+   Read <code>hack/upstream/odk.conf.template</code> and
+   <code>hack/upstream/client-config.json.template</code> to confirm which
+   variables the image's entrypoint substitutes; supply every one of
+   them, including the ones you are blanking.</p>
+</li>
+<li>
+<p><strong>Config changes to <code>DOMAIN</code>, <code>OIDC_ENABLED</code> or the Sentry values
+   are a re-render and reload, not a restart.</strong> The browser reads
+   <code>client-config.json</code> on page load. Implement
+   <code>_reload_nginx()</code> as a Pebble <code>exec</code> of <code>nginx -s reload</code> after the
+   entrypoint's templating step has been re-run, and unit-test that a
+   <code>DOMAIN</code> change triggers it.</p>
+</li>
+<li>
+<p>Start ordering: nginx must not start before <code>service</code> passes
+   <code>api-up</code>. Express this in charm code, not in Pebble <code>requires</code> —
+   the two services are in different containers and Pebble
+   dependencies do not cross container boundaries.</p>
+</li>
+<li>
+<p>Set <code>external-hostname</code> (Q6) and verify:
+   <code>bash
+   juju deploy traefik-k8s --channel latest/stable --trust
+   juju integrate odk-central-k8s traefik-k8s
+   juju config odk-central-k8s external-hostname=&lt;Q6&gt;
+   juju run traefik-k8s/0 show-proxied-endpoints
+   curl -sI https://&lt;Q6&gt;/          # 200, HTML
+   curl -s  https://&lt;Q6&gt;/v1/version.json</code></p>
+</li>
+<li>
+<p>Unit tests: ingress URL propagates into both <code>env.domain</code> in
+   <code>config.json</code> and <code>DOMAIN</code> in the nginx environment; nginx does not
+   start while <code>service</code> is unhealthy; a hostname change reloads nginx.</p>
+</li>
+<li>
+<p>Commit: <code>feat(central): nginx container, frontend config, traefik ingress</code>.</p>
+</li>
+</ol>
+<p><strong>Definition of done:</strong> the Central web UI loads at <code>https://&lt;Q6&gt;/</code>;
+<code>/v1/version.json</code> answers through the ingress.</p>
+<hr />
+<h2>Phase 6 — <code>enketo-k8s</code>, Shared Secrets and the Provided Interface</h2>
+<p><strong>Goals:</strong> The group's centrepiece. <code>odk-central-k8s</code> provides three
+generated secrets over the <code>odk-enketo</code> relation; <code>enketo-k8s</code> consumes
+them, runs its two Redis instances, and publishes its URL back;
+Central re-renders and restarts with a real <code>enketo.url</code>.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Complete <code>lib/charms/odk_central_k8s/v0/odk_enketo.py</code>.</li>
+</ol>
+<p>Provider (<code>odk-central-k8s</code>), on relation-created and on any change
+   to the secrets or the base URL:
+   <code>python
+   self.model.get_secret(label="odk-enketo-api-key").grant(relation)
+   self.model.get_secret(label="odk-enketo-secret").grant(relation)
+   self.model.get_secret(label="odk-enketo-less-secret").grant(relation)
+   relation.data[self.app].update({
+       "api-key-secret-id": ...,
+       "encryption-key-secret-id": ...,
+       "less-secure-key-secret-id": ...,
+       "base-url": self._public_base_url(),
+       "support-email": self.config["sysadmin-email"],
+   })</code>
+   Requirer (<code>enketo-k8s</code>) reads the IDs, calls
+   <code>self.model.get_secret(id=...)</code>, and emits <code>OdkEnketoReadyEvent</code>.
+   Requirer writes back <code>enketo-url</code> (<code>http://&lt;bind-address&gt;:8005/-</code>);
+   the provider emits <code>EnketoUrlChangedEvent</code>.</p>
+<ol>
+<li>
+<p>Write the three secret files into the <code>enketo</code> container <strong>before</strong>
+   starting it:
+   <code>python
+   for path, label, length in (
+       ("/etc/secrets/enketo-secret", "odk-enketo-secret", 64),
+       ("/etc/secrets/enketo-less-secret", "odk-enketo-less-secret", 32),
+       ("/etc/secrets/enketo-api-key", "odk-enketo-api-key", 128),
+   ):
+       value = secret_content[label]
+       if len(value.encode()) != length:      # not len(value) — bytes
+           raise RuntimeError(f"{label} must be exactly {length} bytes")
+       container.push(path, value, make_dirs=True, permissions=0o400)</code>
+   No trailing newline. <code>start-enketo.sh</code> stats the files and aborts on
+   any other size.</p>
+</li>
+<li>
+<p>Render Enketo's <code>config.json</code> from
+   <code>hack/upstream/config.json.template</code> (the Enketo one) using the
+   mapping table above, and push it to the path
+   <code>start-enketo.sh</code> expects. Set <code>hide powered by</code> and the logo
+   fields as upstream does.</p>
+</li>
+<li>
+<p>Redis containers (Q5 default <code>in-charm</code>): two Pebble services in
+   two containers using the same <code>redis-image</code> resource, each with its
+   own config file pushed by the charm from
+   <code>hack/upstream/redis-enketo-main.conf</code> and
+   <code>redis-enketo-cache.conf</code>, with <code>maxmemory</code> overridden from charm
+   config. <code>redis-main</code> mounts the <code>redis-main-data</code> storage at
+   <code>/data</code>. <strong>Keep the cache on port 6380</strong> — Enketo's config expects
+   it and changing it silently breaks nothing until cache lookups start
+   failing.</p>
+</li>
+<li>
+<p>Optional relation override: if a <code>redis-main</code> or <code>redis-cache</code>
+   relation is present, stop the corresponding sidecar, point Enketo's
+   config at the relation endpoint, and set a status message naming
+   which instances are relation-backed.</p>
+</li>
+<li>
+<p><strong>Attempt the relation path once</strong>, whatever Q5 said:
+   <code>bash
+   juju deploy redis-k8s --channel latest/edge
+   juju integrate enketo-k8s:redis-cache redis-k8s</code>
+   Record what happens — deploys and works, deploys and misbehaves, or
+   fails outright — in <code>docs/day2-ops.md</code> under "Redis backing". This
+   is a genuinely open question (Charmhub has no stable Redis charm;
+   <code>redis-k8s</code> is <code>latest/edge</code> revision 23 from 2022-12-05) and the
+   answer is useful independently of this charm. Then remove the
+   relation and continue with the Q5 choice.</p>
+</li>
+<li>
+<p>Central side: on <code>EnketoUrlChangedEvent</code>, re-render <code>config.json</code>
+   with the real <code>enketo.url</code> and restart <code>service</code>. Do not restart
+   nginx.</p>
+</li>
+<li>
+<p>Unit tests, both charms:</p>
+</li>
+<li>secrets granted and IDs published on relation-created;</li>
+<li>a 65-byte secret raises before any Pebble push happens;</li>
+<li>Enketo blocked while the relation is incomplete;</li>
+<li>Central re-renders and restarts on <code>enketo-url</code> arriving;</li>
+<li>relation override stops the sidecar and rewrites the config;</li>
+<li>
+<p><code>rotate-enketo-secrets</code> propagates to Enketo (Phase 7 implements
+     the action; assert the library path here).</p>
+</li>
+<li>
+<p>End-to-end check — this is the first point the group actually works:
+   <code>bash
+   juju deploy ./charms/enketo-k8s/enketo-k8s_amd64.charm \
+     --resource enketo-image=ghcr.io/enketo/enketo:&lt;Q4&gt; \
+     --resource redis-image=redis:8.6.4
+   juju integrate odk-central-k8s enketo-k8s
+   juju wait-for model odk-test --query='forEach(applications, app =&gt; app.status=="active")' --timeout=20m</code></p>
+</li>
+<li>
+<p>Commit: <code>feat(enketo): shared-secret provider/requirer, redis pair, enketo workload</code>.</p>
+</li>
+</ol>
+<p><strong>Definition of done:</strong> all three charms <code>active/idle</code>; Central's
+rendered <code>config.json</code> contains Enketo's real in-cluster URL; Enketo
+started without a secrets-size abort.</p>
+<hr />
+<h2>Phase 7 — Day-2 Actions</h2>
+<p><strong>Goals:</strong> Every action implemented, tested and documented, including
+the cross-charm one.</p>
+<p><strong><code>create-admin</code></strong> — read <code>odk-admin-email</code> from the Juju secret;
+generate a password if <code>odk-admin-password</code> is absent; run Central's
+admin CLI in the <code>service</code> container via Pebble <code>exec</code> (upstream's
+<code>odk-cmd</code> — verify the exact invocation with
+<code>juju ssh --container service odk-central-k8s/0 odk-cmd --help</code>);
+create the user, then promote it to administrator. Return the password
+in <code>event.set_results()</code> <strong>once</strong>, and never log it. If OIDC is
+enabled, fail with a clear message: the password is meaningless.</p>
+<p><strong><code>promote-user</code></strong> / <strong><code>reset-password</code></strong> — same CLI path, one user
+argument each. <code>reset-password</code> must fail cleanly under OIDC.</p>
+<p><strong><code>rotate-enketo-secrets</code></strong> — the interesting one:
+1. Set <code>MaintenanceStatus("rotating enketo secrets")</code>.
+2. Generate three new values at the exact lengths.
+3. Update all three Juju secrets (<code>secret.set_content</code>).
+4. Republish the IDs over the <code>odk-enketo</code> relation — Enketo's
+   requirer sees <code>secret-changed</code>, rewrites the three files and
+   restarts its workload.
+5. Re-render Central's <code>config.json</code> (the API key appears there too)
+   and restart <code>service</code>.
+6. Return a warning: all in-progress web form sessions are invalidated
+   and users mid-submission will have to start again.
+Test that step 4 actually reaches the other charm — a rotation that
+updates Central and leaves Enketo on the old key produces a
+403-on-every-form failure that is very hard to read from the outside.</p>
+<p><strong><code>run-migrations</code></strong> — start the one-shot <code>migrations</code> service, wait,
+report the exit code and the last 50 log lines.</p>
+<p><strong><code>upload-pending-blobs</code></strong> — no-op with a clear message when there is
+no <code>s3</code> relation; otherwise invoke the upstream pending-upload
+entrypoint via Pebble exec and report how many blobs moved. Also wire
+this on a timer: a Pebble
+<a href="https://documentation.ubuntu.com/pebble/"><code>check</code></a> is the wrong tool —
+use an <code>ops</code> <code>update-status</code>-driven trigger honouring
+<code>s3-upload-interval-minutes</code>, or a Pebble service with a sleep loop if
+the upstream tooling supports a daemon mode. Say which you chose in
+<code>docs/day2-ops.md</code>.</p>
+<p><strong><code>purge-deleted</code></strong> — invoke Central's purge path; require
+<code>force=true</code> to bypass the retention window and say so in the
+description.</p>
+<p><strong><code>backup</code></strong> — verify the <code>s3</code> relation; <code>pg_dump --format=custom</code> via
+Pebble exec against the relation's connection string; upload to
+<code>&lt;destination&gt;/&lt;timestamp&gt;/central.dump</code>; also record in the results
+that blobs in S3 are <strong>not</strong> included and that the bucket needs its own
+versioning or lifecycle policy. Return the path.</p>
+<p><strong><code>restore</code></strong> — Maintenance status; stop <code>service</code> and <code>nginx</code>;
+download; <code>pg_restore</code>; run migrations; restart; wait for <code>api-up</code>;
+Active. Refuse to run if the target database is non-empty unless a
+<code>force</code> param is passed.</p>
+<p><strong><code>enketo-k8s</code> actions</strong> — <code>flush-cache</code> (FLUSHALL against the cache
+instance only; refuse if pointed at the durable one) and <code>redis-info</code>
+(return <code>INFO</code> from both).</p>
+<p><strong><code>pyxform-k8s</code> action</strong> — <code>convert</code>, taking a base64 XLSForm and
+returning the XForm, for diagnosis.</p>
+<p><strong>Unit tests:</strong> one per action covering happy path, missing relation,
+and Pebble exec failure propagated as a failed action rather than a
+charm error.</p>
+<p><strong>Commit:</strong> <code>feat(charms): day-2 actions across the group</code>.</p>
+<p><strong>Definition of done:</strong> every action runs against the deployed group;
+<code>create-admin</code> yields a login that works in the UI;
+<code>rotate-enketo-secrets</code> leaves both workloads consistent.</p>
+<hr />
+<h2>Phase 8 — S3, SMTP and OIDC</h2>
+<p><strong>Goals:</strong> The three external integrations that turn a working deploy
+into a production-shaped one.</p>
+<h3>S3 blob storage</h3>
+<p>Wire the data-platform S3 library. On relation established, populate
+<code>external.s3blobStore</code> and re-render. <strong>New blobs go to S3; existing
+blobs stay in PostgreSQL until <code>upload-pending-blobs</code> moves them</strong>, so
+model that partially-migrated state explicitly in the charm's status
+message (<code>ActiveStatus("N blobs pending upload")</code> when the count is
+non-zero and the relation exists).</p>
+<p>For testing, deploy MinIO as a plain k8s Deployment
+(<code>hack/minio-test-deploy.yaml</code>, written in this phase) and point
+<code>s3-integrator</code> at it:</p>
+<pre><code class="language-bash">juju deploy s3-integrator --channel latest/stable
+juju config s3-integrator endpoint=http://minio.default.svc:9000 \
+  bucket=odk-central region=us-east-1 path=/
+juju run s3-integrator/0 sync-s3-credentials access-key=... secret-key=...
+juju integrate odk-central-k8s s3-integrator
+</code></pre>
+<h3>SMTP</h3>
+<p>Wire <code>charms.smtp_integrator.v0.smtp</code>. Populate
+<code>email.transportOpts</code>. Central sends on account creation, password
+reset and project invitation only, so verify with a real action rather
+than a passive check:</p>
+<pre><code class="language-bash">juju deploy smtp-integrator --channel latest/stable
+juju config smtp-integrator host=... port=587 auth_type=plain
+juju integrate odk-central-k8s smtp-integrator
+juju run odk-central-k8s/0 reset-password email=&lt;Q7&gt;
+</code></pre>
+<p>With no SMTP relation, Central must still reach Active — email failure
+is a per-operation error upstream, not a startup one. Set a status
+message noting that account email is unavailable.</p>
+<h3>OIDC</h3>
+<p>Two paths, both supported:</p>
+<ul>
+<li><strong>Related:</strong> <code>charms.hydra.v0.oauth</code> — request the authorisation code
+  flow with scopes <code>openid profile email</code> and the redirect URI
+  <code>https://&lt;domain&gt;/v1/oidc/callback</code> (verify the exact path against
+  the Q3 release's backend source). Populate <code>oidc.*</code> from the
+  relation.</li>
+<li><strong>Configured:</strong> <code>oidc-enabled</code>, <code>oidc-issuer-url</code>, <code>oidc-client-id</code>
+  config plus the <code>odk-oidc-client-secret</code> Juju secret, for a provider
+  with no charm.</li>
+</ul>
+<p>Relation data wins over config when both are present; say so in the
+status message rather than silently preferring one.</p>
+<p><strong>The mode switch is the part to get right.</strong> Enabling OIDC disables
+HTTP Basic and <code>POST /v1/session</code> upstream. So:
+- <code>oidc-enabled=true</code> must also set <code>OIDC_ENABLED=true</code> in the nginx
+  environment and re-render <code>client-config.json</code>, or the frontend
+  offers a password form that cannot work.
+- The charm's own health check must stay on the unauthenticated
+  <code>/v1/version.json</code>, never on a session-creating endpoint.
+- <code>create-admin</code>, <code>promote-user</code> and <code>reset-password</code> must fail with a
+  clear message under OIDC, not with a CLI stack trace.
+- Toggling <code>oidc-enabled</code> on a running deploy locks out every existing
+  password user. Emit a warning in the status message and document it
+  in <code>docs/day2-ops.md</code> as a one-way door in practice.</p>
+<p>Unit tests: relation-over-config precedence; nginx re-render on toggle;
+password actions blocked under OIDC; health check unaffected.</p>
+<p><strong>Commit:</strong> <code>feat(central): s3 blob store, smtp, oidc via hydra or config</code>.</p>
+<p><strong>Definition of done:</strong> a submission attachment lands in the MinIO
+bucket; <code>reset-password</code> delivers mail; with <code>oidc-enabled=true</code> the
+UI redirects to the provider and a login round-trips.</p>
+<hr />
+<h2>Phase 9 — Observability</h2>
+<p><strong>Goals:</strong> COS-Lite first class across all three charms.</p>
+<p><strong>Loki.</strong> <code>LogProxyConsumer</code> in each charm, forwarding every Pebble
+service's logs: <code>service</code>, <code>nginx</code>, <code>enketo</code>, <code>redis-main</code>,
+<code>redis-cache</code>, <code>pyxform</code>. Verify the actual on-disk log paths inside
+each container rather than assuming
+<code>/var/log/pebble/&lt;service&gt;/&lt;service&gt;.log</code>.</p>
+<p><strong>Prometheus.</strong> Check first whether Central exposes metrics:</p>
+<pre><code class="language-bash">juju ssh --container service odk-central-k8s/0 curl -s http://localhost:8383/metrics | head
+</code></pre>
+<p>If it does, use <code>MetricsEndpointProvider</code> with a static target on 8383.
+If it does not, ship an <code>exporter</code> Pebble service in the <code>service</code>
+container: a small <code>prometheus_client</code> process that authenticates with
+a dedicated Central app-user token and exposes gauges for project
+count, form count, submissions in the last hour, and pending-blob
+count. Do <strong>not</strong> poll the API more often than every 60 seconds. Redis
+metrics: run <code>redis_exporter</code> alongside each instance, or parse <code>INFO</code>
+in the same exporter — either is acceptable, pick one and say which.</p>
+<p><strong>Tempo.</strong> Wire the <code>tracing</code> charmlib and set
+<code>OTEL_EXPORTER_OTLP_ENDPOINT</code> in the <code>service</code> environment. Check
+whether <code>central-backend</code> instruments with OpenTelemetry (search the
+upstream source for <code>opentelemetry</code>); if it does not, do not fake it —
+wire the relation, note in <code>docs/observability.md</code> that the workload
+emits no spans today, and leave it there. A tracing relation that
+silently produces nothing is worse than an honest gap.</p>
+<p><strong>Grafana dashboards.</strong> <code>src/dashboards/odk-central-overview.json</code> with
+panels for submissions per hour, API request rate and error rate (from
+nginx logs via Loki if Prometheus has no HTTP metrics), pending-blob
+count, Enketo cache hit rate, and pyxform conversion latency. Register
+with <code>GrafanaDashboardProvider</code>.</p>
+<p><strong>Alert rules.</strong> <code>src/prometheus_alert_rules/odk-central.rule</code>:
+- <code>/v1/version.json</code> failing for more than 2 minutes;
+- pending-blob count rising for more than an hour with an <code>s3</code>
+  relation present (the upload job has stalled);
+- <code>redis-main</code> unreachable — this is the one piece of non-PostgreSQL
+  state in the group;
+- pyxform conversion failure rate above a threshold (a broken
+  converter blocks all form publishing while everything else looks
+  healthy).</p>
+<p><strong>Deploy COS-Lite</strong> in a second model, offer the endpoints
+cross-model, and integrate all three charms.</p>
+<p><strong>Commit:</strong> <code>feat(charms): COS-Lite observability across the group</code>.</p>
+<p><strong>Definition of done:</strong> the dashboard renders with at least one
+populated panel; Loki holds logs from all six workload services; alert
+rules load without error in Prometheus.</p>
+<hr />
+<h2>Phase 10 — Integration Tests</h2>
+<p><strong>Goals:</strong> A <code>jubilant</code> suite that exercises the whole group, including
+the paths that only break across charm boundaries.</p>
+<p><strong><code>tests/integration/conftest.py</code></strong> — one module-scoped fixture
+deploying the full composition from the Relation Surface section into a
+<code>jubilant.temp_model()</code>, waiting for all applications active, then
+running <code>create-admin</code> and yielding both the <code>Juju</code> handle and the
+admin credentials.</p>
+<p><strong><code>tests/integration/test_deploy.py</code>:</strong>
+- <code>test_version_endpoint()</code> — <code>/v1/version.json</code> returns the Q3 version.
+- <code>test_ui_reachable()</code> — the ingress URL returns 200 and HTML.
+- <code>test_frontend_config_matches_domain()</code> — fetch
+  <code>client-config.json</code> through the ingress and assert the origin
+  matches <code>external-hostname</code>. This catches the baked-at-build-time
+  frontend problem, which nothing else does.</p>
+<p><strong><code>tests/integration/test_form_lifecycle.py</code></strong> — the end-to-end test
+that proves all three charms are actually cooperating:
+1. Create a project via <code>POST /v1/projects</code>.
+2. Upload <code>tests/data/minimal.xlsx</code> as a form
+   (<code>POST /v1/projects/{id}/forms?ignoreWarnings=true</code>) — <strong>this
+   exercises <code>pyxform-k8s</code></strong>; a conversion failure surfaces here.
+3. Publish the form draft.
+4. Fetch the Enketo-backed public link
+   (<code>/v1/projects/{id}/forms/{xml}/public-links</code> or the preview
+   endpoint for the Q3 release) — <strong>this exercises <code>enketo-k8s</code> and the
+   shared API key</strong>; a secrets mismatch surfaces here as a 403.
+5. Submit an instance with an attachment via <code>POST .../submission</code>.
+6. Read it back through the OData feed
+   (<code>/v1/projects/{id}/forms/{xml}.svc/Submissions</code>) and assert the
+   value round-trips.
+7. With an <code>s3</code> relation, run <code>upload-pending-blobs</code> and assert the
+   attachment is retrievable through the redirect.</p>
+<p><strong><code>tests/integration/test_secrets.py</code>:</strong>
+- <code>test_rotate_enketo_secrets()</code> — capture a working public form link,
+  run <code>rotate-enketo-secrets</code>, wait for both applications active, and
+  assert the form still renders. A rotation that reaches Central but
+  not Enketo fails here with a 403, which is exactly the regression
+  worth guarding.</p>
+<p><strong><code>tests/integration/test_upgrade.py</code>:</strong>
+- <code>test_refresh_charm()</code> — deploy, refresh all three charms to the
+  freshly packed revision, assert Active regained and the form
+  lifecycle test still passes.</p>
+<p><strong><code>tests/integration/test_day2.py</code>:</strong>
+- <code>test_backup_restore()</code> — backup, drop and recreate the database
+  relation, restore, assert the project and form survive.
+- <code>test_purge_deleted()</code> — soft-delete a form, purge with <code>force</code>,
+  assert it is gone.</p>
+<p><strong>Commit:</strong> <code>test(integration): jubilant suite for the full charm group</code>.</p>
+<p><strong>Definition of done:</strong> the whole suite passes in a clean model; the CI
+integration job passes on push to main.</p>
+<hr />
+<h2>Phase 11 — Docs Site</h2>
+<p><strong>Goals:</strong> A complete mkdocs-material site with real values, no
+placeholders.</p>
+<p><code>docs/index.md</code> — what ODK Central is, and specifically <strong>why three
+charms</strong> rather than one. Reproduce the bootstrap-ordering diagram.</p>
+<p><code>docs/quickstart.md</code> — zero to first submission: every <code>juju deploy</code>
+and <code>juju integrate</code> command, the <code>juju secret add</code> for the admin
+email, the <code>create-admin</code> action, and how to reach the UI. Include an
+abbreviated <code>juju status</code>.</p>
+<p><code>docs/architecture.md</code> — the component map, the two ODK-specific
+interfaces with their databag contents, the secret sizes and why they
+matter, and the partially-migrated blob state.</p>
+<p><code>docs/configuration.md</code> — every config key of all three charms,
+auto-generated from the three <code>charmcraft.yaml</code> files by
+<code>scripts/check-docs.py</code>, with a CI check that fails when the tables and
+the YAML diverge.</p>
+<p><code>docs/relations.md</code> — per relation: what to deploy, why, the commands,
+and what the charm's status becomes when it is broken. Include the
+Redis situation honestly: no stable Redis charm exists on Charmhub, the
+default is in-charm, and here is what happened when we tried the edge
+charm in Phase 6.</p>
+<p><code>docs/day2-ops.md</code> —
+- backup and restore, including that S3 blobs are outside the dump;
+- what <code>juju refresh</code> does to migrations, and when to run
+  <code>run-migrations</code> by hand;
+- Enketo secret rotation and its user-visible effect;
+- the OIDC one-way door;
+- <code>redis-main</code> is the only non-PostgreSQL, non-S3 state in the group;
+- disaster-recovery posture: Juju model backup + <code>pg_dump</code> + S3 bucket
+  versioning;
+- Redis backing notes from Phase 6.</p>
+<p><code>docs/observability.md</code> — COS-Lite wiring, the dashboard, the alert
+rules table, and the honest note about tracing if the workload does not
+emit spans.</p>
+<p><code>docs/migrating-from-compose.md</code> — moving an existing upstream Docker
+Compose deployment: dump and load PostgreSQL, hand the existing Enketo
+secrets to the charm instead of letting it generate new ones (a
+<code>juju secret add</code> per value, at the exact lengths), and what to do
+about the legacy 9.6→14 <code>postgres</code> upgrade container, which has no
+charm equivalent.</p>
+<p>Build and deploy: <code>mkdocs build --strict</code> then <code>mkdocs gh-deploy --force</code>.</p>
+<p><strong>Commit:</strong> <code>docs: complete mkdocs-material site for the charm group</code>.</p>
+<p><strong>Definition of done:</strong> <code>mkdocs build --strict</code> exits 0; GitHub Pages
+serves the site; <code>scripts/check-docs.py</code> passes.</p>
+<hr />
+<h2>Phase 12 — Release Scaffolding</h2>
+<p><strong>Goals:</strong> First tagged release <code>0.1.0</code> with Charmhub upload wiring for
+all three charms; uploadable but not published to a public channel.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>
+<p>Populate <code>CHANGELOG.md</code> <code>[0.1.0]</code> with everything from Phases 1–11.</p>
+</li>
+<li>
+<p>Tag and push:
+   <code>bash
+   git tag -a 0.1.0 -m "chore(release): 0.1.0 — first production-ready release"
+   git push origin 0.1.0</code></p>
+</li>
+<li>
+<p><code>.github/workflows/charmhub-upload.yml</code> — a matrix over the three
+   charms, upload-only (track commented out):
+   <code>yaml
+   name: Charmhub upload
+   on:
+     push:
+       tags: ['*']
+   jobs:
+     upload:
+       runs-on: ubuntu-latest
+       strategy:
+         matrix:
+           charm: [odk-central-k8s, enketo-k8s, pyxform-k8s]
+       steps:
+         - uses: actions/checkout@v4
+         - uses: canonical/charmcraft-actions/upload@v1
+           with:
+             credentials: ${{ secrets.CHARMHUB_TOKEN }}
+             charm-path: charms/${{ matrix.charm }}
+             charm-name: ${{ matrix.charm }}
+             # track: &lt;Q9-track&gt;   # leave commented: upload-only</code></p>
+</li>
+<li>
+<p>Register all three names at https://charmhub.io/register-charm
+   (manual; cannot be automated) and add <code>CHARMHUB_TOKEN</code> to the
+   repository secrets.</p>
+</li>
+<li>
+<p>Verify the upload job produces a revision for each charm
+   (<code>charmcraft status &lt;name&gt;</code>).</p>
+</li>
+<li>
+<p>Write <code>RELEASE.md</code> describing the manual promotion path, and
+   <strong>state the group constraint explicitly</strong>: the three charms are
+   released together and <code>odk-central-k8s</code> and its <code>nginx-image</code> are
+   version-locked to the same upstream tag. Promoting one charm alone
+   is how this group breaks.</p>
+</li>
+</ol>
+<p><strong>Final commit:</strong></p>
+<pre><code class="language-bash">git commit -m &quot;chore(release): 0.1.0 release scaffolding, Charmhub upload workflow
+
+CHANGELOG 0.1.0 populated. Matrix charmhub-upload workflow across the
+three charms (upload-only). RELEASE.md documents the promotion path and
+the group version-lock constraint.&quot;
+git push -u origin main
+git push origin 0.1.0
+</code></pre>
+<p><strong>Definition of done:</strong> three Charmhub revisions exist; none is in a
+public channel.</p>
+<hr />
+<h2>Post-build checklist</h2>
+<ul>
+<li>[ ] <code>charmcraft pack</code> exits 0 for all three charms from a clean checkout.</li>
+<li>[ ] <code>uv run pytest charms/*/tests/unit</code> passes with ≥ 95% branch coverage on each <code>src/charm.py</code>.</li>
+<li>[ ] <code>uv run pytest tests/integration</code> passes in a clean Juju model.</li>
+<li>[ ] <code>uv run pre-commit run --all-files</code> exits 0.</li>
+<li>[ ] <code>mkdocs build --strict</code> exits 0.</li>
+<li>[ ] <code>scripts/check-docs.py</code> passes for all three config tables.</li>
+<li>[ ] All three applications reach <code>active/idle</code> from a cold <code>juju deploy</code> with no manual intervention beyond <code>create-admin</code>.</li>
+<li>[ ] The form lifecycle test round-trips: XLSForm upload → pyxform → publish → Enketo render → submit → OData read.</li>
+<li>[ ] <code>juju run odk-central-k8s/0 rotate-enketo-secrets</code> leaves a public form link working.</li>
+<li>[ ] A submission attachment appears in the S3 bucket after <code>upload-pending-blobs</code>.</li>
+<li>[ ] With <code>oidc-enabled=true</code>, the UI redirects to the provider and the password actions fail with a clear message rather than a stack trace.</li>
+<li>[ ] No secret value appears in <code>juju config &lt;any-charm&gt; --format=json</code>.</li>
+<li>[ ] No <code>SENTRY_*</code> value from upstream's shipped defaults survives anywhere in the rendered config or the nginx environment.</li>
+<li>[ ] <code>/etc/secrets/*</code> inside the Enketo container are exactly 64, 32 and 128 bytes.</li>
+<li>[ ] <code>grep -rn "prototype\|PoC\|spike" docs/</code> returns empty.</li>
+</ul>
+<hr />
+<h2>Upstream references</h2>
+<ul>
+<li>ODK Central deployment repo: https://github.com/getodk/central</li>
+<li><code>docker-compose.yml</code>: https://raw.githubusercontent.com/getodk/central/master/docker-compose.yml</li>
+<li><code>.env.template</code>: https://raw.githubusercontent.com/getodk/central/master/.env.template</li>
+<li>Service config template: https://raw.githubusercontent.com/getodk/central/master/files/service/config.json.template</li>
+<li>Enketo config template: https://raw.githubusercontent.com/getodk/central/master/files/enketo/config.json.template</li>
+<li>Enketo startup script (secret size assertions): https://raw.githubusercontent.com/getodk/central/master/files/enketo/start-enketo.sh</li>
+<li>Redis configs: https://raw.githubusercontent.com/getodk/central/master/files/enketo/redis-enketo-main.conf</li>
+<li>Central backend: https://github.com/getodk/central-backend</li>
+<li>Central frontend: https://github.com/getodk/central-frontend</li>
+<li>Enketo: https://github.com/enketo/enketo</li>
+<li>pyxform: https://github.com/XLSForm/pyxform</li>
+<li>ODK docs: https://docs.getodk.org</li>
+<li>Central API reference: https://docs.getodk.org/central-api/</li>
+<li>Central OIDC / authentication notes: https://docs.getodk.org/central-api-authentication/</li>
+<li>Install requirements (2 GB RAM floor): https://docs.getodk.org/central-install-digital-ocean/</li>
+<li>postgresql-k8s: https://charmhub.io/postgresql-k8s</li>
+<li>traefik-k8s: https://charmhub.io/traefik-k8s</li>
+<li>s3-integrator: https://charmhub.io/s3-integrator</li>
+<li>smtp-integrator: https://charmhub.io/smtp-integrator</li>
+<li>hydra (oauth interface): https://charmhub.io/hydra</li>
+<li>redis-k8s (latest/edge only): https://charmhub.io/redis-k8s</li>
+<li>loki-k8s: https://charmhub.io/loki-k8s</li>
+<li>prometheus-k8s: https://charmhub.io/prometheus-k8s</li>
+<li>grafana-k8s: https://charmhub.io/grafana-k8s</li>
+<li>tempo-coordinator-k8s: https://charmhub.io/tempo-coordinator-k8s</li>
+<li>Canonical Kubernetes: https://documentation.ubuntu.com/canonical-kubernetes/</li>
+<li>charmcraft 4.x: https://documentation.ubuntu.com/charmcraft/en/latest/</li>
+<li>ops 3.x: https://ops.readthedocs.io/en/latest/</li>
+<li>Juju secrets: https://juju.is/docs/sdk/secrets</li>
+<li>Pebble: https://documentation.ubuntu.com/pebble/</li>
+<li>jubilant: https://github.com/canonical/jubilant</li>
+<li>Keep a Changelog: https://keepachangelog.com</li>
+<li>Contributor Covenant 2.1: https://www.contributor-covenant.org/version/2/1/code_of_conduct/</li>
+<li>Apache 2.0: https://www.apache.org/licenses/LICENSE-2.0.txt</li>
+<li>mkdocs-material: https://squidfunk.github.io/mkdocs-material/</li>
+</ul></div></a><div class="index-item-stats"><span>511 bash · 2 askuserquestion · 1 toolsearch</span>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>Pre-flight findings before I ask you the Phase 0 questions:</p>
+<p><strong>Blocker:</strong> <code>juju</code> is not installed and there is no Kubernetes on this box. Available: <code>charmcraft 4.4.1</code>, <code>uv 0.12.3</code>, <code>python 3.12.3</code>, <code>git 2.43</code>, <code>lxd</code>, <code>rockcraft</code>, <code>jhack</code>, and <strong><code>concierge 1.7.0</code></strong> (which can provision Canonical K8s + Juju). No <code>gh</code> CLI either. Resources: 8 CPU / 9 GB RAM / 49 GB free.</p>
+<p><strong>Q3/Q4 verified against upstream</strong> — <code>getodk/central</code> tag <code>v2026.2.4</code> (latest) pins exactly the prompt's defaults: <code>enketo/enketo:7.6.1</code>, <code>pyxform-http:v4.5.0</code>, <code>redis:8.6.4</code>. One notable discovery: upstream <em>builds</em> its enketo image from <code>enketo.dockerfile</code>, layering <code>start-enketo.sh</code> and the config template on top of the stock <code>ghcr.io/enketo/enketo:7.6.1</code>. The stock image the charm gets has neither — so the charm must supply the start command and config itself (and the 64/32/128-byte assertions live in a script we won't run; I'll still honour the sizes and verify what Enketo actually needs in Phase 6).</p>
+<p>Now the answers I need:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p><code>concierge</code> is installing Canonical Kubernetes (<code>k8s 1.32-classic/stable</code>) — good, that's the preferred substrate.</p>
+<p>Two landmines found in the nginx template that change the design:</p>
+<ol>
+<li><code>odk.conf.template</code> <strong>hardcodes</strong> <code>proxy_pass http://enketo:8005</code> and <code>http://service:8383</code>. <code>service</code> is same-pod (fine as localhost), but <code>enketo</code> is a separate Juju application — that hostname will never resolve. The charm must push its own templates into <code>/usr/share/odk/nginx/</code> (which is exactly what upstream's compose bind-mount does).</li>
+<li><code>/csp-report</code> proxies to <code>https://${SENTRY_ORG_SUBDOMAIN}.ingest.sentry.io/api/${SENTRY_PROJECT}/...</code>. Naively blanking <code>SENTRY_*</code> per Q10 yields <code>https://.ingest.sentry.io/api//security/</code> — nginx fails to load that config. Blanking has to <em>remove</em> the block, not just empty the variables.</li>
+</ol>
+<p>Starting the Phase 1 scaffold while k8s installs.</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>Confirmed <code>uv export --package &lt;member&gt;</code> produces hashed, pinned requirements from the single workspace lock — so I can keep the workspace <em>and</em> get reproducible packs.</p>
+<p>Two spec corrections I need to make, both of which would break Phase 9 if followed literally:</p>
+<ul>
+<li>The relation matrix lists <code>metrics-endpoint</code> and <code>grafana-dashboard</code> under <code>requires:</code> for all three charms. In COS these are <strong>provided</strong> by the workload charm (<code>prometheus-k8s</code> is the requirer of <code>prometheus_scrape</code>; <code>grafana-k8s</code> of <code>grafana_dashboard</code>). As written, <code>juju integrate odk-central-k8s prometheus-k8s</code> would find no compatible endpoint pair. Moving them to <code>provides:</code>. <code>logging</code> and <code>tracing</code> stay <code>requires:</code>, which is correct.</li>
+<li>Symlinking the shared libs from a root <code>lib/</code> won't survive <code>charmcraft pack</code> (files outside the project dir aren't followed). Using a canonical root <code>lib/</code> plus a sync script and a pre-commit check that the per-charm copies match.</li>
+</ul>
+<p>Writing the two charm libraries:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>Definitive: <code>config.json</code>'s <code>database.*</code> <strong>is</strong> honoured — central-backend translates it into libpq env vars, and env vars set in the container take precedence and log a warning. Also, unknown keys under <code>database</code> throw (<code>host, port, database, user, password, maximumPoolSize</code> only), so TLS must go via <code>PGSSLMODE</code>/<code>PGSSLROOTCERT</code>, never a <code>ssl</code> key.</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>Everything works with the right <code>Host</code>: frontend 200, <code>/version.txt</code> reports <strong>v2026.2.4</strong>, the API proxies through nginx, and <code>client-config.json</code> shows <code>sentryDsn: ""</code> — Q10 verified end to end.</p>
+<p>That exposed a real bug: my nginx Pebble check would 421 as soon as <code>external-hostname</code> is set. Fixing:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p><strong>Phase 5 verified live</strong>: frontend 200, API 200, v2026.2.4 through traefik, both Pebble checks up, and three consecutive <code>update-status</code> events with no migration runs.</p>
+<p>Starting Phase 6. First, deploying the stock Enketo image so I can inspect where it actually expects its config (upstream's own image is a derived build, so the paths differ):</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p><strong>That's the answer — and it exposed a bug.</strong> <code>redis-k8s</code> rev 42 deploys, relates, and is reachable (PONG), but Enketo returns 502: the charm pushed a new <code>config.json</code> and called <code>replan()</code>, which is a no-op because the <em>layer</em> didn't change — so Enketo kept its old config pointing at the sidecar we'd just stopped. Same class of bug as the nginx one:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>All five checks pass: <code>POST /v1/sessions</code> → 404 (route removed under OIDC), both password actions refuse with clear messages, and <code>/v1/oidc/login</code> redirects correctly — failing only on the mock's inadequate discovery document, exactly as predicted.</p>
+<p>That redirect exposed one cosmetic bug: <code>//login</code> from a trailing slash in <code>env.domain</code>. Fixing:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>All the failures are one test bug, not a charm bug: Central takes the form id from the spreadsheet's <code>settings</code> sheet, so <code>X-XlsForm-FormId-Fallback</code> is ignored and every test uploads the <em>same</em> form id — 409 on the second, and the purge test then deletes an id that never existed. Generating a distinct form per test:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>Three failures, and one is a <strong>real charm bug</strong>. Analysing:</p>
+<ul>
+<li><code>test_purge_deleted</code>: uses a literal form id instead of the one Central returned — test bug.</li>
+<li><code>test_refresh_charm</code>: <code>EPERM</code> connecting to pyxform right after a rolling refresh — the Service has no endpoints yet; the test needs to retry.</li>
+<li><code>test_a_new_form_still_gets_an_enketo_id_after_rotation</code>: <strong>real</strong>. Let me confirm the mechanism:</li>
+</ul></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>Still failing, so this is persistent, not timing: after rotation Enketo keeps the <strong>old</strong> key, so Central's requests are rejected and no Enketo id is ever assigned. The requirer's <code>secret-changed</code> handler filters on a raw ID string comparison, which is fragile. Making the trigger not depend on that at all:</p></div></div><button class="expand-btn">Show more</button></div></div>
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content"><p>The build is complete. All twelve phases are done, tagged <code>0.1.0</code>, working tree clean, test models torn down.</p>
+<h2>What was built</h2>
+<p>Three charms in <code>/home/ubuntu/odk-central-operators</code>, deploying ODK Central <strong>v2026.2.4</strong>: <code>odk-central-k8s</code> (API + nginx), <code>enketo-k8s</code> (Enketo + two Redis instances), <code>pyxform-k8s</code> (XLSForm conversion), plus the two charm libraries binding them.</p>
+<p><strong>Verified on the real cluster</strong>, not just in unit tests — Canonical Kubernetes 1.32, Juju 3.6.27:</p>
+<ul>
+<li><strong>25/25 integration tests pass</strong>, including the full lifecycle: XLSForm → pyxform → publish → Enketo renders → submit with attachment → OData read.</li>
+<li>Unit tests: 180 across the three charms, 95% / 97% / 100% branch coverage, gated in CI.</li>
+<li>Secret rotation, backup/restore against MinIO, mail delivery through Mailpit, OIDC mode switching, and COS (25 metrics, 13 alert rules, 2 dashboards, 7 log streams) all exercised live.</li>
+</ul>
+<h2>Answers I changed, and why</h2>
+<p>Two spec items would have broken the build as written, so I corrected them:</p>
+<ul>
+<li><strong><code>metrics-endpoint</code>/<code>grafana-dashboard</code> are <code>provides:</code>, not <code>requires:</code>.</strong> As specified, <code>juju integrate odk-central-k8s prometheus-k8s</code> would have found no compatible endpoint pair. Phase 9 confirmed this — those relations only integrate because of the correction.</li>
+<li><strong>PostgreSQL 14, not 16.</strong> ODK Central ships <code>postgresql-client-14</code>, and <code>pg_dump</code> refuses to dump a newer server. On 16 the app runs fine but <code>backup</code>/<code>restore</code> <em>and Central's own <code>/v1/backup</code></em> silently stop working. Documented and detected in the charm.</li>
+</ul>
+<p>Also: <code>/v1/version.json</code> doesn't exist (health check uses <code>/v1/config/public</code>); the COS charms have moved to versioned tracks; <code>redis-k8s</code> is now revision 42 and works.</p>
+<h2>Bugs the live deployment found that tests alone did not</h2>
+<p>Seven, of which three were structural:</p>
+<ol>
+<li><strong>Config files never reached running workloads.</strong> Pebble's <code>replan</code> only restarts on <em>layer</em> changes, so every config change — database, SMTP, S3, <code>enketo.url</code> — landed on disk while the process kept its startup values. It only looked correct because refreshes restarted pods. Mail delivery exposed it.</li>
+<li><strong>Secret rotation left Enketo on the old key permanently.</strong> A rotation changes contents, not IDs, so the databag was byte-identical and Enketo got no relation event — while both apps reported healthy and existing forms kept working.</li>
+<li><strong>A Juju secret written in a hook isn't current until the hook ends</strong>, so the rotation re-rendered Central with the key being replaced.</li>
+</ol>
+<p>Plus: nginx's <code>server_names_hash_bucket_size</code> too small for Juju-length hostnames; a 0400 secret file that couldn't be overwritten (rotation worked once, then never); migrations re-running every <code>update-status</code>; a leaked file handle.</p>
+<h2>Two things you should know</h2>
+<ul>
+<li><strong>No git remote</strong> (Q1: local only) — 16 commits and the <code>0.1.0</code> tag are local. Charmhub upload needs the three names registered and <code>CHARMHUB_TOKEN</code> set; <code>RELEASE.md</code> documents both.</li>
+<li><strong>The Juju controller ran out of disk mid-build.</strong> Every <code>juju refresh --path</code> uploads the whole charm and nothing reclaims old revisions; the default 2 GiB volume filled and MongoDB crash-looped. I grew the volume in place and documented it in <code>CONTRIBUTING.md</code> — bootstrap with <code>--storage-pool-size=16G</code>.</li>
+</ul></div></div><button class="expand-btn">Show more</button></div></div>
+</div></div>
+<div class="index-item"><a href="page-001.html#msg-2026-08-26T19-59-13-467Z"><div class="index-item-header"><span class="index-item-number">#3</span><time datetime="2026-08-26T19:59:13.467Z" data-timestamp="2026-08-26T19:59:13.467Z">2026-08-26T19:59:13.467Z</time></div><div class="index-item-content"><p><command-name>/exit</command-name>
+            <command-message>exit</command-message>
+            <command-args></command-args></p></div></a></div>
+<div class="index-item"><a href="page-001.html#msg-2026-08-26T19-59-13-467Z"><div class="index-item-header"><span class="index-item-number">#4</span><time datetime="2026-08-26T19:59:13.467Z" data-timestamp="2026-08-26T19:59:13.467Z">2026-08-26T19:59:13.467Z</time></div><div class="index-item-content"><p><local-command-stdout>Catch you later!</local-command-stdout></p></div></a></div>
+<div class="index-item"><a href="page-001.html#msg-2026-08-26T19-59-13-468Z"><div class="index-item-header"><span class="index-item-number">#2</span><time datetime="2026-08-26T19:59:13.468Z" data-timestamp="2026-08-26T19:59:13.468Z">2026-08-26T19:59:13.468Z</time></div><div class="index-item-content"><p><local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat></p></div></a></div>
+        
+
+<div class="pagination">
+<span class="current">Index</span>
+<span class="disabled">&larr; Prev</span>
+<a href="page-001.html">1</a>
+<a href="page-001.html">Next &rarr;</a>
+</div>
+
+
+        <dialog id="search-modal">
+            <div class="search-modal-header">
+                <input type="text" id="modal-search-input" placeholder="Search..." aria-label="Search transcripts">
+                <button id="modal-search-btn" type="button" aria-label="Search">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
+                </button>
+                <button id="modal-close-btn" type="button" aria-label="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                </button>
+            </div>
+            <div id="search-status"></div>
+            <div id="search-results"></div>
+        </dialog>
+        <script>
+(function() {
+    var totalPages = 1;
+    var searchBox = document.getElementById('search-box');
+    var searchInput = document.getElementById('search-input');
+    var searchBtn = document.getElementById('search-btn');
+    var modal = document.getElementById('search-modal');
+    var modalInput = document.getElementById('modal-search-input');
+    var modalSearchBtn = document.getElementById('modal-search-btn');
+    var modalCloseBtn = document.getElementById('modal-close-btn');
+    var searchStatus = document.getElementById('search-status');
+    var searchResults = document.getElementById('search-results');
+
+    if (!searchBox || !modal) return;
+
+    // Hide search on file:// protocol (doesn't work due to CORS restrictions)
+    if (window.location.protocol === 'file:') return;
+
+    // Show search box (progressive enhancement)
+    searchBox.style.display = 'flex';
+
+    // Gist preview support - detect if we're on gisthost.github.io or gistpreview.github.io
+    var hostname = window.location.hostname;
+    var isGistPreview = hostname === 'gisthost.github.io' || hostname === 'gistpreview.github.io';
+    var gistId = null;
+    var gistOwner = null;
+    var gistInfoLoaded = false;
+
+    if (isGistPreview) {
+        // Extract gist ID from URL query string like ?78a436a8a9e7a2e603738b8193b95410/index.html
+        var queryMatch = window.location.search.match(/^\?([a-f0-9]+)/i);
+        if (queryMatch) {
+            gistId = queryMatch[1];
+        }
+    }
+
+    async function loadGistInfo() {
+        if (!isGistPreview || !gistId || gistInfoLoaded) return;
+        try {
+            var response = await fetch('https://api.github.com/gists/' + gistId);
+            if (response.ok) {
+                var info = await response.json();
+                gistOwner = info.owner.login;
+                gistInfoLoaded = true;
+            }
+        } catch (e) {
+            console.error('Failed to load gist info:', e);
+        }
+    }
+
+    function getPageFetchUrl(pageFile) {
+        if (isGistPreview && gistOwner && gistId) {
+            // Use raw gist URL for fetching content
+            return 'https://gist.githubusercontent.com/' + gistOwner + '/' + gistId + '/raw/' + pageFile;
+        }
+        return pageFile;
+    }
+
+    function getPageLinkUrl(pageFile) {
+        if (isGistPreview && gistId) {
+            // Use gistpreview URL format for navigation links
+            return '?' + gistId + '/' + pageFile;
+        }
+        return pageFile;
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function escapeRegex(string) {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function openModal(query) {
+        modalInput.value = query || '';
+        searchResults.innerHTML = '';
+        searchStatus.textContent = '';
+        modal.showModal();
+        modalInput.focus();
+        if (query) {
+            performSearch(query);
+        }
+    }
+
+    function closeModal() {
+        modal.close();
+        // Update URL to remove search fragment, preserving path and query string
+        if (window.location.hash.startsWith('#search=')) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+    }
+
+    function updateUrlHash(query) {
+        if (query) {
+            // Preserve path and query string when adding hash
+            history.replaceState(null, '', window.location.pathname + window.location.search + '#search=' + encodeURIComponent(query));
+        }
+    }
+
+    function highlightTextNodes(element, searchTerm) {
+        var walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+        var nodesToReplace = [];
+
+        while (walker.nextNode()) {
+            var node = walker.currentNode;
+            if (node.nodeValue.toLowerCase().indexOf(searchTerm.toLowerCase()) !== -1) {
+                nodesToReplace.push(node);
+            }
+        }
+
+        nodesToReplace.forEach(function(node) {
+            var text = node.nodeValue;
+            var regex = new RegExp('(' + escapeRegex(searchTerm) + ')', 'gi');
+            var parts = text.split(regex);
+            if (parts.length > 1) {
+                var span = document.createElement('span');
+                parts.forEach(function(part) {
+                    if (part.toLowerCase() === searchTerm.toLowerCase()) {
+                        var mark = document.createElement('mark');
+                        mark.textContent = part;
+                        span.appendChild(mark);
+                    } else {
+                        span.appendChild(document.createTextNode(part));
+                    }
+                });
+                node.parentNode.replaceChild(span, node);
+            }
+        });
+    }
+
+    function fixInternalLinks(element, pageFile) {
+        // Update all internal anchor links to include the page file
+        var links = element.querySelectorAll('a[href^="#"]');
+        links.forEach(function(link) {
+            var href = link.getAttribute('href');
+            link.setAttribute('href', pageFile + href);
+        });
+    }
+
+    function processPage(pageFile, html, query) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(html, 'text/html');
+        var resultsFromPage = 0;
+
+        // Find all message blocks
+        var messages = doc.querySelectorAll('.message');
+        messages.forEach(function(msg) {
+            var text = msg.textContent || '';
+            if (text.toLowerCase().indexOf(query.toLowerCase()) !== -1) {
+                resultsFromPage++;
+
+                // Get the message ID for linking
+                var msgId = msg.id || '';
+                var pageLinkUrl = getPageLinkUrl(pageFile);
+                var link = pageLinkUrl + (msgId ? '#' + msgId : '');
+
+                // Clone the message HTML and highlight matches
+                var clone = msg.cloneNode(true);
+                // Fix internal links to include the page file
+                fixInternalLinks(clone, pageLinkUrl);
+                highlightTextNodes(clone, query);
+
+                var resultDiv = document.createElement('div');
+                resultDiv.className = 'search-result';
+                resultDiv.innerHTML = '<a href="' + link + '">' +
+                    '<div class="search-result-page">' + escapeHtml(pageFile) + '</div>' +
+                    '<div class="search-result-content">' + clone.innerHTML + '</div>' +
+                    '</a>';
+                searchResults.appendChild(resultDiv);
+            }
+        });
+
+        return resultsFromPage;
+    }
+
+    async function performSearch(query) {
+        if (!query.trim()) {
+            searchStatus.textContent = 'Enter a search term';
+            return;
+        }
+
+        updateUrlHash(query);
+        searchResults.innerHTML = '';
+        searchStatus.textContent = 'Searching...';
+
+        // Load gist info if on gistpreview (needed for constructing URLs)
+        if (isGistPreview && !gistInfoLoaded) {
+            searchStatus.textContent = 'Loading gist info...';
+            await loadGistInfo();
+            if (!gistOwner) {
+                searchStatus.textContent = 'Failed to load gist info. Search unavailable.';
+                return;
+            }
+        }
+
+        var resultsFound = 0;
+        var pagesSearched = 0;
+
+        // Build list of pages to fetch
+        var pagesToFetch = [];
+        for (var i = 1; i <= totalPages; i++) {
+            pagesToFetch.push('page-' + String(i).padStart(3, '0') + '.html');
+        }
+
+        searchStatus.textContent = 'Searching...';
+
+        // Process pages in batches of 3, but show results immediately as each completes
+        var batchSize = 3;
+        for (var i = 0; i < pagesToFetch.length; i += batchSize) {
+            var batch = pagesToFetch.slice(i, i + batchSize);
+
+            // Create promises that process results immediately when each fetch completes
+            var promises = batch.map(function(pageFile) {
+                return fetch(getPageFetchUrl(pageFile))
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('Failed to fetch');
+                        return response.text();
+                    })
+                    .then(function(html) {
+                        // Process and display results immediately
+                        var count = processPage(pageFile, html, query);
+                        resultsFound += count;
+                        pagesSearched++;
+                        searchStatus.textContent = 'Found ' + resultsFound + ' result(s) in ' + pagesSearched + '/' + totalPages + ' pages...';
+                    })
+                    .catch(function() {
+                        pagesSearched++;
+                        searchStatus.textContent = 'Found ' + resultsFound + ' result(s) in ' + pagesSearched + '/' + totalPages + ' pages...';
+                    });
+            });
+
+            // Wait for this batch to complete before starting the next
+            await Promise.all(promises);
+        }
+
+        searchStatus.textContent = 'Found ' + resultsFound + ' result(s) in ' + totalPages + ' pages';
+    }
+
+    // Event listeners
+    searchBtn.addEventListener('click', function() {
+        openModal(searchInput.value);
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            openModal(searchInput.value);
+        }
+    });
+
+    modalSearchBtn.addEventListener('click', function() {
+        performSearch(modalInput.value);
+    });
+
+    modalInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            performSearch(modalInput.value);
+        }
+    });
+
+    modalCloseBtn.addEventListener('click', closeModal);
+
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeModal();
+        }
+    });
+
+    // Check for #search= in URL on page load
+    if (window.location.hash.startsWith('#search=')) {
+        var query = decodeURIComponent(window.location.hash.substring(8));
+        if (query) {
+            searchInput.value = query;
+            openModal(query);
+        }
+    }
+})();
+        </script>
+    </div>
+    <script>
+document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
+    const timestamp = el.getAttribute('data-timestamp');
+    const date = new Date(timestamp);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    if (isToday) { el.textContent = timeStr; }
+    else { el.textContent = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + timeStr; }
+});
+document.querySelectorAll('pre.json').forEach(function(el) {
+    let text = el.textContent;
+    text = text.replace(/"([^"]+)":/g, '<span style="color: #ce93d8">"$1"</span>:');
+    text = text.replace(/: "([^"]*)"/g, ': <span style="color: #81d4fa">"$1"</span>');
+    text = text.replace(/: (\d+)/g, ': <span style="color: #ffcc80">$1</span>');
+    text = text.replace(/: (true|false|null)/g, ': <span style="color: #f48fb1">$1</span>');
+    el.innerHTML = text;
+});
+document.querySelectorAll('.truncatable').forEach(function(wrapper) {
+    const content = wrapper.querySelector('.truncatable-content');
+    const btn = wrapper.querySelector('.expand-btn');
+    if (content.scrollHeight > 250) {
+        wrapper.classList.add('truncated');
+        btn.addEventListener('click', function() {
+            if (wrapper.classList.contains('truncated')) { wrapper.classList.remove('truncated'); wrapper.classList.add('expanded'); btn.textContent = 'Show less'; }
+            else { wrapper.classList.remove('expanded'); wrapper.classList.add('truncated'); btn.textContent = 'Show more'; }
+        });
+    }
+});
+</script>
+</body>
+</html>
