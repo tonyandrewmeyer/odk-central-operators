@@ -442,3 +442,92 @@ def test_no_pg_environment_variables_are_set(
     container = container_named(state_out, "service")
     environment = container.layers["service"].services["service"].environment
     assert not [key for key in environment if key.startswith("PG")]
+
+
+# Migrations are gated, not run on every hook
+
+
+def _ran_migrations(ctx: testing.Context[OdkCentralCharm]) -> bool:
+    """Return whether the charm executed the migration command."""
+    return any(
+        call.command[:2] == ["node", "./lib/bin/run-migrations"]
+        for call in ctx.exec_history.get("service", [])
+    )
+
+
+def test_migrations_run_when_the_database_arrives(
+    ctx: testing.Context[OdkCentralCharm],
+    service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """A fresh database has to be migrated before the API can use it."""
+    state_in = testing.State(containers={service, nginx}, relations={postgresql}, leader=True)
+
+    ctx.run(ctx.on.relation_changed(postgresql), state_in)
+
+    assert _ran_migrations(ctx)
+
+
+def test_migrations_run_on_upgrade(
+    ctx: testing.Context[OdkCentralCharm],
+    service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """A new charm revision may ship a new workload with schema changes."""
+    state_in = testing.State(containers={service, nginx}, relations={postgresql}, leader=True)
+
+    ctx.run(ctx.on.upgrade_charm(), state_in)
+
+    assert _ran_migrations(ctx)
+
+
+def test_migrations_do_not_run_on_every_update_status(
+    ctx: testing.Context[OdkCentralCharm],
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """Re-migrating every few minutes is pure waste on a running deployment."""
+    service = testing.Container(
+        "service",
+        can_connect=True,
+        execs={migrations_exec()},
+        layers={
+            "service": testing.pebble.Layer(
+                {
+                    "services": {
+                        "service": {
+                            "override": "replace",
+                            "command": "npx --no pm2-runtime ./pm2.config.js",
+                            "startup": "enabled",
+                        }
+                    }
+                }
+            )
+        },
+        service_statuses={"service": testing.pebble.ServiceStatus.ACTIVE},
+    )
+    state_in = testing.State(containers={service, nginx}, relations={postgresql}, leader=True)
+
+    ctx.run(ctx.on.update_status(), state_in)
+
+    assert not _ran_migrations(ctx)
+
+
+def test_migrations_run_when_the_api_has_never_started(
+    ctx: testing.Context[OdkCentralCharm],
+    service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """Covers a database that settled before the container was reachable.
+
+    Without this, the schema-affecting event would have been missed and the
+    migrations would never run.
+    """
+    state_in = testing.State(containers={service, nginx}, relations={postgresql}, leader=True)
+
+    ctx.run(ctx.on.update_status(), state_in)
+
+    assert _ran_migrations(ctx)

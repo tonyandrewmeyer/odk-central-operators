@@ -7,6 +7,7 @@ import pathlib
 from typing import Any
 
 import charm as charm_module
+import ops
 import pytest
 import requests
 from charm import CONFIG_PATH, NGINX_TEMPLATE_DIR, OdkCentralCharm, generate_secret
@@ -57,6 +58,24 @@ def api_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
 def ctx() -> testing.Context[OdkCentralCharm]:
     """Return a Scenario context for the charm."""
     return testing.Context(OdkCentralCharm)
+
+
+@pytest.fixture
+def restarts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every Pebble service restart the charm performs.
+
+    Scenario's resulting state cannot distinguish a service that was restarted
+    from one that was already running, so the call itself is what gets asserted.
+    """
+    calls: list[str] = []
+    original = ops.Container.restart
+
+    def spy(self: ops.Container, *service_names: str) -> None:
+        calls.extend(service_names)
+        original(self, *service_names)
+
+    monkeypatch.setattr(ops.Container, "restart", spy)
+    return calls
 
 
 @pytest.fixture

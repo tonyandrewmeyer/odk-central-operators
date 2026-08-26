@@ -17,7 +17,11 @@ from urllib.parse import urlparse
 
 import ops
 import requests
-from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.data_platform_libs.v0.data_interfaces import (
+    DatabaseCreatedEvent,
+    DatabaseEndpointsChangedEvent,
+    DatabaseRequires,
+)
 from charms.odk_central_k8s.v0.odk_enketo import (
     SECRET_LABEL_API_KEY,
     SECRET_LABEL_ENCRYPTION_KEY,
@@ -43,8 +47,9 @@ NGINX_TEMPLATE_DIR = "/usr/share/odk/nginx"
 NGINX_ENTRYPOINT = "/scripts/setup-odk.sh"
 
 # nginx serves this static file, written into the image at build time. It is
-# what reports the deployed version; there is no API route that does.
-NGINX_HEALTH_PATH = "/version.txt"
+# what reports the deployed version; there is no API route that does. Fetching
+# it requires a Host header matching the configured domain.
+VERSION_PATH = "/version.txt"
 
 # How long a hook will wait for the API to answer before giving up and letting
 # the next event retry. nginx proxies to the API and fails its own start if the
@@ -70,6 +75,15 @@ SERVER_COMMAND = "npx --no pm2-runtime ./pm2.config.js"
 HEALTH_PATH = "/v1/config/public"
 
 MIGRATION_TIMEOUT = 3600
+
+# Events after which the database schema may need migrating. Everything else
+# reconciles without paying for a migration run.
+MIGRATION_EVENTS = (
+    ops.InstallEvent,
+    ops.UpgradeCharmEvent,
+    DatabaseCreatedEvent,
+    DatabaseEndpointsChangedEvent,
+)
 
 DATABASE_NAME = "odk"
 
@@ -146,11 +160,11 @@ class OdkCentralCharm(ops.CharmBase):
 
     def _on_lifecycle_event(self, event: ops.EventBase) -> None:
         """Reconcile on any event that could have changed the desired state."""
-        self._reconcile()
+        self._reconcile(migrate=isinstance(event, MIGRATION_EVENTS))
 
     # Reconciliation
 
-    def _reconcile(self) -> None:
+    def _reconcile(self, *, migrate: bool = False) -> None:
         """Bring the workloads into line with configuration and relation data.
 
         Every hook routes through here rather than each handler doing its own
@@ -185,13 +199,22 @@ class OdkCentralCharm(ops.CharmBase):
             permissions=0o600,
         )
 
-        self.unit.status = ops.MaintenanceStatus("running database migrations")
-        try:
-            self._run_migrations(container)
-        except MigrationError as exc:
-            logger.error("database migrations failed (%s):\n%s", exc.exit_code, exc.output)
-            self.unit.status = ops.BlockedStatus("database migration failed; see juju debug-log")
-            return
+        # Migrations are cheap when there is nothing to do, but not free, and
+        # running them from update-status every few minutes is pure waste. Run
+        # them when something could have changed the schema, and whenever the
+        # API has not been started yet -- which covers the case where the
+        # database relation settled before the container was reachable.
+        started = SERVICE_CONTAINER in container.get_plan().services
+        if migrate or not started:
+            self.unit.status = ops.MaintenanceStatus("running database migrations")
+            try:
+                self._run_migrations(container)
+            except MigrationError as exc:
+                logger.error("database migrations failed (%s):\n%s", exc.exit_code, exc.output)
+                self.unit.status = ops.BlockedStatus(
+                    "database migration failed; see juju debug-log"
+                )
+                return
 
         container.add_layer(SERVICE_CONTAINER, self._service_layer(), combine=True)
         container.replan()
@@ -520,27 +543,35 @@ class OdkCentralCharm(ops.CharmBase):
         )
 
         layer = self._nginx_layer()
+        # Capture the running plan *before* merging the new layer into it:
+        # add_layer rewrites the plan, so comparing afterwards would never see
+        # a difference and the frontend would keep serving a stale origin.
+        environment_changed = self._environment_changed(container, layer)
         container.add_layer(NGINX_CONTAINER, layer, combine=True)
 
         service = container.get_services().get(NGINX_CONTAINER)
         if service is None or not service.is_running():
-            container.replan()
             container.start(NGINX_CONTAINER)
-        elif changed or self._nginx_plan_changed(container, layer):
+        elif changed or environment_changed:
             container.restart(NGINX_CONTAINER)
 
-    def _nginx_plan_changed(self, container: ops.Container, layer: ops.pebble.Layer) -> bool:
-        """Return whether the running nginx service differs from the wanted one."""
+    @staticmethod
+    def _environment_changed(container: ops.Container, layer: ops.pebble.Layer) -> bool:
+        """Return whether the wanted nginx environment differs from the running one.
+
+        Must be called before ``add_layer``.
+        """
         current = container.get_plan().services.get(NGINX_CONTAINER)
         wanted = layer.services[NGINX_CONTAINER]
-        return current is None or current.environment != wanted.environment
+        return current is None or dict(current.environment) != dict(wanted.environment)
 
     @staticmethod
     def _push_if_changed(container: ops.Container, path: str, content: str) -> bool:
         """Push ``content`` to ``path`` and return whether it differed."""
         try:
-            if container.pull(path).read() == content:
-                return False
+            with container.pull(path) as existing:
+                if existing.read() == content:
+                    return False
         except (ops.pebble.PathError, ops.pebble.APIError):
             pass
         container.push(path, content, make_dirs=True)
@@ -573,7 +604,15 @@ class OdkCentralCharm(ops.CharmBase):
                         "level": "ready",
                         "period": "15s",
                         "threshold": 3,
-                        "http": {"url": f"http://localhost:{NGINX_PORT}{NGINX_HEALTH_PATH}"},
+                        # The same check upstream's compose file uses. An HTTP
+                        # check is not an option: upstream's config has a
+                        # catch-all server block that answers 421 to any Host it
+                        # does not serve, and Pebble cannot override the Host
+                        # header of an http check -- setting it as a header is a
+                        # no-op in Go, which takes Host from the URL. Whether
+                        # nginx is serving the right content is covered by the
+                        # charm's own reconcile and by the integration suite.
+                        "exec": {"command": f"nc -z localhost {NGINX_PORT}"},
                     },
                 },
             }
