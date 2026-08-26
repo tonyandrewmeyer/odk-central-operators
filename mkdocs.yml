@@ -1,0 +1,76 @@
+site_name: ODK Central Charms
+site_description: >-
+  Juju charms for ODK Central, Enketo and pyxform — deploying the ODK Central
+  data collection platform on Kubernetes.
+site_url: https://tonyandrewmeyer.github.io/odk-central-operators/
+repo_url: https://github.com/tonyandrewmeyer/odk-central-operators
+repo_name: odk-central-operators
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Canonical Ltd. — Apache 2.0
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Quick start: quickstart.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+  - Relations: relations.md
+  - Day-2 operations: day2-ops.md
+  - Observability: observability.md
+  - Migrating from Docker Compose: migrating-from-compose.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tonyandrewmeyer/odk-central-operators
+    - icon: fontawesome/solid/book
+      link: https://docs.getodk.org
+
+watch:
+  - charms

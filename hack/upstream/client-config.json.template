@@ -1,0 +1,4 @@
+{
+  "oidcEnabled": ${OIDC_ENABLED},
+  "sentryDsn": "${SENTRY_DSN_FRONTEND}"
+}
