@@ -1,0 +1,62 @@
+# A Mailpit SMTP sink for exercising the smtp relation in a test model.
+#
+# ODK Central only sends mail on account creation, password reset and project
+# invitation, so a passive check cannot tell you whether mail works. This gives
+# somewhere for those messages to land and a web UI and API to read them back.
+#
+#   sudo k8s kubectl apply -f hack/mailpit-test-deploy.yaml
+#   juju config smtp-integrator host=mailpit.mailpit.svc port=1025 \
+#     auth_type=none transport_security=none
+#
+# Not for production: no authentication, no TLS, and nothing is persisted.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mailpit
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  namespace: mailpit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailpit
+  template:
+    metadata:
+      labels:
+        app: mailpit
+    spec:
+      containers:
+        - name: mailpit
+          image: axllent/mailpit:v1.22
+          ports:
+            - containerPort: 1025
+              name: smtp
+            - containerPort: 8025
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8025
+            initialDelaySeconds: 3
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  namespace: mailpit
+spec:
+  selector:
+    app: mailpit
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: 1025
+    - name: http
+      port: 8025
+      targetPort: 8025

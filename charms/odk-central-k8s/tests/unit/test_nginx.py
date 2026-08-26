@@ -12,6 +12,7 @@ from conftest import (
     CLIENT_CONFIG,
     NGINX_CONF,
     NGINX_TEMPLATE_DIR,
+    OIDC_SECRET_ID,
     container_named,
     nginx_environment,
     pushed_to_nginx,
@@ -193,15 +194,17 @@ def test_upstream_sentry_defaults_never_reach_nginx(
     assert "3cf75f54983e473da6bd07daddf0d2ee" not in serialised
 
 
-def test_oidc_flag_reaches_the_frontend_config(
+def test_oidc_flag_is_not_advertised_until_it_works(
     ctx: testing.Context[OdkCentralCharm],
     service: testing.Container,
     nginx: testing.Container,
     postgresql: testing.Relation,
 ) -> None:
-    """The browser reads oidcEnabled from client-config.json at page load.
+    """Setting oidc-enabled alone must not offer a login that cannot work.
 
-    Without this the frontend offers a password form that cannot work.
+    The browser reads oidcEnabled from client-config.json at page load, so
+    advertising OIDC before a provider is configured would replace the password
+    form with a button that goes nowhere.
     """
     state_in = testing.State(
         containers={service, nginx},
@@ -212,7 +215,40 @@ def test_oidc_flag_reaches_the_frontend_config(
 
     state_out = ctx.run(ctx.on.config_changed(), state_in)
 
+    assert isinstance(state_out.unit_status, testing.BlockedStatus)
+    assert "oidc-enabled is set but no usable provider" in state_out.unit_status.message
+    assert nginx_environment(state_out)["OIDC_ENABLED"] == "false"
+
+
+def test_oidc_flag_reaches_the_frontend_when_configured(
+    ctx: testing.Context[OdkCentralCharm],
+    service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+    oidc_client_secret: testing.Secret,
+) -> None:
+    """With a complete configuration the frontend switches to OIDC."""
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql},
+        secrets={oidc_client_secret},
+        leader=True,
+        config={
+            "oidc-enabled": True,
+            "oidc-issuer-url": "https://idp.example.com",
+            "oidc-client-id": "odk-central",
+            "oidc-client-secret": OIDC_SECRET_ID,
+        },
+    )
+
+    state_out = ctx.run(ctx.on.config_changed(), state_in)
+
     assert nginx_environment(state_out)["OIDC_ENABLED"] == "true"
+    oidc = rendered_config(state_out, ctx)["oidc"]
+    assert oidc["enabled"] is True
+    assert oidc["issuerUrl"] == "https://idp.example.com"
+    assert oidc["clientId"] == "odk-central"
+    assert oidc["clientSecret"] == "sssh"
 
 
 # The public hostname
@@ -233,7 +269,9 @@ def test_ingress_url_becomes_the_domain(
     state_out = ctx.run(ctx.on.config_changed(), state_in)
 
     assert nginx_environment(state_out)["DOMAIN"] == "odk.ingress.example"
-    assert rendered_config(state_out, ctx)["env"]["domain"] == "https://odk.ingress.example/"
+    # No trailing slash: Central concatenates onto env.domain without
+    # normalising, and would otherwise redirect to "https://host//login".
+    assert rendered_config(state_out, ctx)["env"]["domain"] == "https://odk.ingress.example"
 
 
 def test_configured_hostname_overrides_the_ingress(
@@ -368,7 +406,9 @@ def test_unchanged_configuration_does_not_bounce_nginx(
         ),
     )
 
-    assert restarts == []
+    # Scoped to nginx: the service container has no mounts in this test, so its
+    # config.json looks new on every run.
+    assert "nginx" not in restarts
 
 
 def test_nginx_health_check_does_not_depend_on_the_host_header(

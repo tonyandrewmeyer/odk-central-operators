@@ -15,6 +15,8 @@ from charms.odk_central_k8s.v0.odk_enketo import SECRET_LENGTHS
 from ops import testing
 
 DB_ENDPOINTS = "postgresql-k8s-primary.odk.svc.cluster.local:5432"
+# Juju secret URIs are "secret:" plus a 20-character identifier.
+OIDC_SECRET_ID = "secret:d0f8hs93kalq2mn4rt6y"
 NGINX_CONF = f"{NGINX_TEMPLATE_DIR}/odk.conf.template"
 CLIENT_CONFIG = f"{NGINX_TEMPLATE_DIR}/client-config.json.template"
 
@@ -113,6 +115,12 @@ def ingress() -> testing.Relation:
         remote_app_name="traefik-k8s",
         remote_app_data={"ingress": json.dumps({"url": "https://odk.ingress.example/"})},
     )
+
+
+@pytest.fixture
+def oidc_client_secret() -> testing.Secret:
+    """Return the operator-provided OIDC client secret."""
+    return testing.Secret(id=OIDC_SECRET_ID, tracked_content={"client-secret": "sssh"})
 
 
 @pytest.fixture

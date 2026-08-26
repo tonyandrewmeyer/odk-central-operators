@@ -28,6 +28,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.data_platform_libs.v0.s3 import S3Requirer
+from charms.hydra.v0.oauth import ClientConfig, OAuthRequirer
 from charms.odk_central_k8s.v0.odk_enketo import (
     ENKETO_PORT,
     SECRET_LABEL_API_KEY,
@@ -38,6 +39,7 @@ from charms.odk_central_k8s.v0.odk_enketo import (
     OdkEnketoProvider,
 )
 from charms.pyxform_k8s.v0.xlsform import XlsformRequirer
+from charms.smtp_integrator.v0.smtp import SmtpRequires
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,13 @@ SECRET_LABEL_ADMIN_PASSWORD = "odk-admin-password"
 GENERATED_PASSWORD_LENGTH = 24
 
 ACTION_TIMEOUT = 600
+
+# Central builds this from env.domain itself; the same value has to be
+# registered with the provider or the callback is rejected.
+OIDC_CALLBACK_PATH = "/v1/oidc/callback"
+# Central sends openid and email, and requires the email and email_verified
+# claims. profile is requested as well so that users get a display name.
+OIDC_SCOPES = "openid email profile"
 BACKUP_TIMEOUT = 3600
 
 # Where a dump lives inside the service container while it is being moved.
@@ -239,6 +248,19 @@ class OdkCentralCharm(ops.CharmBase):
             port=NGINX_PORT,
             strip_prefix=False,
         )
+        self.smtp = SmtpRequires(self, relation_name="smtp")
+        # Constructed after the ingress requirer: the redirect URI it registers
+        # with the provider is derived from the public URL, which the ingress
+        # relation supplies.
+        self.oauth = OAuthRequirer(
+            self,
+            client_config=ClientConfig(
+                redirect_uri=f"{self._external_url().rstrip('/')}{OIDC_CALLBACK_PATH}",
+                scope=OIDC_SCOPES,
+                grant_types=["authorization_code"],
+            ),
+            relation_name="oauth",
+        )
 
         for event in (
             self.on.install,
@@ -257,6 +279,10 @@ class OdkCentralCharm(ops.CharmBase):
             self.enketo.on.enketo_url_changed,
             self.s3.on.credentials_changed,
             self.s3.on.credentials_gone,
+            self.smtp.on.smtp_data_available,
+            self.on["smtp"].relation_broken,
+            self.oauth.on.oauth_info_changed,
+            self.oauth.on.oauth_info_removed,
             self.on[NGINX_CONTAINER].pebble_ready,
         ):
             framework.observe(event, self._on_lifecycle_event)
@@ -318,10 +344,10 @@ class OdkCentralCharm(ops.CharmBase):
             self.unit.status = ops.WaitingStatus("waiting for the postgresql relation")
             return
 
-        container.push(
+        config_changed = self._push_if_changed(
+            container,
             CONFIG_PATH,
             json.dumps(self._render_service_config(database, shared_secrets), indent=2),
-            make_dirs=True,
             permissions=0o600,
         )
 
@@ -346,23 +372,67 @@ class OdkCentralCharm(ops.CharmBase):
         container.replan()
         self.unit.set_ports(API_PORT, NGINX_PORT)
 
+        # Central reads config.json once, at startup, and replan only restarts a
+        # service whose *layer* changed. Without this, a new database endpoint,
+        # SMTP relay, blob store or enketo.url would sit on disk while the
+        # running workload kept using the values it started with.
+        service = container.get_services().get(SERVICE_CONTAINER)
+        if config_changed and service is not None and service.is_running():
+            logger.info("service configuration changed; restarting the api")
+            container.restart(SERVICE_CONTAINER)
+
         if not self._wait_for_api():
             self.unit.status = ops.WaitingStatus("waiting for the api to become healthy")
             return
 
         self._reconcile_nginx()
-        self.unit.status = self._status()
+        self.unit.status = self._status(container)
 
-    def _status(self) -> ops.StatusBase:
-        """Return the status that reflects what is and is not yet wired up."""
-        missing: list[str] = []
+    def _status(self, container: ops.Container | None = None) -> ops.StatusBase:
+        """Return a status that names what is and is not yet wired up.
+
+        Blocked beats degraded: a deployment that is running but cannot publish
+        forms, render them, or send mail should say which, rather than showing
+        a bare "active" that hides it.
+        """
+        if self.config["oidc-enabled"] and not self._oidc_ready():
+            return ops.BlockedStatus(
+                "oidc-enabled is set but no usable provider: relate an oauth "
+                "provider, or set oidc-issuer-url, oidc-client-id and "
+                "oidc-client-secret"
+            )
+
+        notes: list[str] = []
         if self.xlsform.endpoint is None:
-            missing.append("xlsform (form publishing will fail)")
+            notes.append("no xlsform relation, form publishing will fail")
         if self.enketo.enketo_url is None:
-            missing.append("enketo (web forms will not render)")
-        if missing:
-            return ops.ActiveStatus(f"api ready; waiting for {', '.join(missing)}")
-        return ops.ActiveStatus()
+            notes.append("no enketo relation, web forms will not render")
+        if not self.model.relations.get("smtp"):
+            notes.append("no smtp relation, account email will not be sent")
+
+        if self._oidc_ready():
+            source = "oauth relation" if self._oauth_provider() else "config"
+            notes.append(f"oidc via {source}, password login disabled")
+
+        pending = self._pending_blobs_note(container)
+        if pending:
+            notes.append(pending)
+
+        return ops.ActiveStatus("; ".join(notes))
+
+    def _pending_blobs_note(self, container: ops.Container | None) -> str:
+        """Return a note about attachments still waiting to move to S3.
+
+        New blobs go to S3 as soon as the relation exists, but existing ones
+        stay in PostgreSQL until upload-pending-blobs moves them. That
+        partially-migrated state can last indefinitely, so it is worth saying.
+        """
+        if container is None or not self._s3_config():
+            return ""
+        count = self._pending_blob_count(container)
+        if not count:
+            return ""
+        return f"{count} blobs pending upload to s3"
 
     def _invalid_config(self) -> str | None:
         """Return a message describing the first invalid config option, if any."""
@@ -461,19 +531,105 @@ class OdkCentralCharm(ops.CharmBase):
         fail while everything else keeps working. An empty host would risk
         failing at transport construction, which happens at startup.
         """
-        hostname = str(self.config["external-hostname"]).strip() or "localhost"
-        sender = str(self.config["email-from"]).strip() or f"no-reply@{hostname}"
+        sender = str(self.config["email-from"]).strip() or f"no-reply@{self._domain()}"
+        transport: dict[str, Any] = {
+            "host": "localhost",
+            "port": 25,
+            "secure": False,
+            "ignoreTLS": True,
+            "auth": {"user": "", "pass": ""},
+        }
+
+        relay = self._smtp_data()
+        if relay is not None:
+            transport = {
+                "host": relay.host,
+                "port": relay.port,
+                # "secure" means implicit TLS on connect, which is what the
+                # relation calls TLS. STARTTLS is negotiated afterwards and is
+                # not the same thing.
+                "secure": relay.transport_security.value == "tls",
+                "ignoreTLS": relay.transport_security.value == "none",
+                "auth": {"user": relay.user or "", "pass": relay.password or ""},
+            }
+
         return {
             "serviceAccount": sender,
             "transport": "smtp",
-            "transportOpts": {
-                "host": "localhost",
-                "port": 25,
-                "secure": False,
-                "ignoreTLS": True,
-                "auth": {"user": "", "pass": ""},
-            },
+            "transportOpts": transport,
         }
+
+    def _smtp_data(self) -> Any:
+        """Return the SMTP relay's settings, or ``None`` when unrelated."""
+        if not self.model.relations.get("smtp"):
+            return None
+        try:
+            return self.smtp.get_relation_data()
+        except Exception:  # noqa: BLE001 - the library validates and raises broadly
+            logger.warning("the smtp relation data is not usable yet")
+            return None
+
+    # --- OpenID Connect ---------------------------------------------------
+
+    def _oidc_config(self) -> dict[str, Any]:
+        """Return the ``oidc`` stanza.
+
+        Relation data wins over configuration when both are present, and the
+        status message says so rather than silently preferring one.
+        """
+        disabled = {"enabled": False, "issuerUrl": "", "clientId": "", "clientSecret": ""}
+        if not self.config["oidc-enabled"]:
+            return disabled
+
+        provider = self._oauth_provider()
+        if provider is not None:
+            return {
+                "enabled": True,
+                "issuerUrl": provider.issuer_url,
+                "clientId": provider.client_id or "",
+                "clientSecret": provider.client_secret or "",
+            }
+
+        issuer = str(self.config["oidc-issuer-url"]).strip()
+        client_id = str(self.config["oidc-client-id"]).strip()
+        client_secret = self._oidc_client_secret()
+        if not (issuer and client_id and client_secret):
+            return disabled
+
+        return {
+            "enabled": True,
+            "issuerUrl": issuer,
+            "clientId": client_id,
+            "clientSecret": client_secret,
+        }
+
+    def _oauth_provider(self) -> Any:
+        """Return the provider's details from the oauth relation, if usable."""
+        if not self.model.relations.get("oauth"):
+            return None
+        try:
+            provider = self.oauth.get_provider_info()
+        except Exception:  # noqa: BLE001 - the library validates and raises broadly
+            logger.warning("the oauth relation data is not usable yet")
+            return None
+        if provider is None or not provider.issuer_url or not provider.client_id:
+            return None
+        return provider
+
+    def _oidc_client_secret(self) -> str:
+        """Return the operator-provided OIDC client secret, if there is one."""
+        secret_id = str(self.config.get("oidc-client-secret") or "").strip()
+        if not secret_id:
+            return ""
+        try:
+            content = self.model.get_secret(id=secret_id).get_content(refresh=True)
+        except (ops.SecretNotFoundError, ops.ModelError):
+            return ""
+        return content.get("client-secret", "")
+
+    def _oidc_ready(self) -> bool:
+        """Return whether OIDC is both requested and fully configured."""
+        return bool(self._oidc_config()["enabled"])
 
     def _sentry_config(self) -> dict[str, Any]:
         """Return the ``sentry`` stanza, blank unless an operator opted in.
@@ -538,12 +694,7 @@ class OdkCentralCharm(ops.CharmBase):
                     "domain": self._external_url(),
                     "sysadminAccount": str(self.config["sysadmin-email"]),
                 },
-                "oidc": {
-                    "enabled": False,
-                    "issuerUrl": "",
-                    "clientId": "",
-                    "clientSecret": "",
-                },
+                "oidc": self._oidc_config(),
                 "external": {
                     "sentry": self._sentry_config(),
                     "s3blobStore": {
@@ -621,7 +772,10 @@ class OdkCentralCharm(ops.CharmBase):
         if hostname:
             return f"https://{hostname}"
         if self.ingress.url:
-            return str(self.ingress.url)
+            # Traefik advertises a trailing slash. Central concatenates paths
+            # onto env.domain without normalising, so leaving it produces
+            # redirects to "https://host//login".
+            return str(self.ingress.url).rstrip("/")
         return f"http://localhost:{API_PORT}"
 
     def _domain(self) -> str:
@@ -639,7 +793,10 @@ class OdkCentralCharm(ops.CharmBase):
             # Never enable certbot inside the charm.
             "SSL_TYPE": "upstream",
             "HTTPS_PORT": "443",
-            "OIDC_ENABLED": "true" if self.config["oidc-enabled"] else "false",
+            # The browser reads this from client-config.json at page load.
+            # Advertising OIDC before it is usable would offer a login that
+            # cannot work; so would offering a password form once it is.
+            "OIDC_ENABLED": "true" if self._oidc_ready() else "false",
             "ENKETO_UPSTREAM": self._enketo_upstream(),
             # Upstream's shipped defaults are the ODK project's own Sentry
             # organisation and key. They are never inherited.
@@ -739,15 +896,26 @@ class OdkCentralCharm(ops.CharmBase):
         return current is None or dict(current.environment) != dict(wanted.environment)
 
     @staticmethod
-    def _push_if_changed(container: ops.Container, path: str, content: str) -> bool:
-        """Push ``content`` to ``path`` and return whether it differed."""
+    def _push_if_changed(
+        container: ops.Container,
+        path: str,
+        content: str,
+        *,
+        permissions: int | None = None,
+    ) -> bool:
+        """Push ``content`` to ``path``, returning whether it differed.
+
+        Pebble's replan only restarts a service whose *layer* changed, so a
+        workload configured from a file needs the charm to notice the file
+        changing and restart it explicitly.
+        """
         try:
             with container.pull(path) as existing:
                 if existing.read() == content:
                     return False
         except (ops.pebble.PathError, ops.pebble.APIError):
             pass
-        container.push(path, content, make_dirs=True)
+        container.push(path, content, make_dirs=True, permissions=permissions)
         return True
 
     def _nginx_layer(self) -> ops.pebble.Layer:
