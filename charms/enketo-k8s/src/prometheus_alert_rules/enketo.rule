@@ -1,0 +1,62 @@
+groups:
+  - name: enketo
+    rules:
+      - alert: EnketoDown
+        expr: enketo_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Enketo is not serving web forms.
+          description: >-
+            Enketo has not been accepting connections for five minutes. Web
+            forms will not render, so browser-based data collection is
+            unavailable. Submissions from the mobile client are unaffected.
+
+      - alert: EnketoDurableRedisUnreachable
+        expr: enketo_redis_up{instance="main"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Enketo's durable Redis instance is unreachable.
+          description: >-
+            This is the only state in the ODK Central charm group that is not in
+            PostgreSQL or the blob store: it holds in-flight form and instance
+            state, which is to say submissions people have started but not yet
+            sent. Losing it loses those.
+
+      - alert: EnketoDurableRedisNotSaving
+        expr: enketo_redis_last_save_ok{instance="main"} == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Enketo's durable Redis is not writing its snapshot.
+          description: >-
+            Background saves are failing, so in-flight form state is only in
+            memory and will not survive a restart. The usual cause is the
+            storage being full or read-only.
+
+      - alert: EnketoCacheRedisUnreachable
+        expr: enketo_redis_up{instance="cache"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Enketo's cache Redis instance is unreachable.
+          description: >-
+            Forms will be re-transformed on every request, which is slow but not
+            lossy. This is deliberately a lower severity than the durable
+            instance.
+
+      - alert: EnketoCacheEvicting
+        expr: rate(enketo_redis_evicted_keys{instance="cache"}[30m]) > 0
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: Enketo's form cache is evicting under memory pressure.
+          description: >-
+            Raise redis-cache-maxmemory if form rendering has become slow.
+            Eviction from the cache is safe; it only costs a re-transformation.

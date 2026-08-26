@@ -1,0 +1,507 @@
+{
+  "title": "Enketo \u2014 web forms and Redis",
+  "uid": "enketo-overview",
+  "tags": [
+    "odk",
+    "enketo"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Availability",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Enketo up",
+      "description": "Whether Enketo is accepting connections.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "min(enketo_up)",
+          "legendFormat": "Enketo up",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Durable Redis up",
+      "description": "Holds in-flight form state. This is the only state in the group that is not in PostgreSQL or the blob store.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "min(enketo_redis_up{instance=\"main\"})",
+          "legendFormat": "Durable Redis up",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cache Redis up",
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "min(enketo_redis_up{instance=\"cache\"})",
+          "legendFormat": "Cache Redis up",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Last snapshot ok",
+      "description": "0 means in-flight form state is only in memory.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "min(enketo_redis_last_save_ok{instance=\"main\"})",
+          "legendFormat": "Last snapshot ok",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cache evictions (30m)",
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(enketo_redis_evicted_keys{instance=\"cache\"}[30m]))",
+          "legendFormat": "Cache evictions (30m)",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Clients",
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "sum(enketo_redis_connected_clients)",
+          "legendFormat": "Clients",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Cache effectiveness",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache hit ratio",
+      "description": "A low ratio means forms are being transformed repeatedly. Missing the cache is safe but slow.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(enketo_redis_keyspace_hits{instance=\"cache\"}[5m])) / clamp_min(sum(rate(enketo_redis_keyspace_hits{instance=\"cache\"}[5m])) + sum(rate(enketo_redis_keyspace_misses{instance=\"cache\"}[5m])), 1)",
+          "legendFormat": "hit ratio",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis memory in use",
+      "description": "The durable instance has no limit by default on purpose: evicting from it would drop in-flight form state.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "targets": [
+        {
+          "expr": "enketo_redis_memory_used_bytes",
+          "legendFormat": "{{instance}} used",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        },
+        {
+          "expr": "enketo_redis_memory_max_bytes",
+          "legendFormat": "{{instance}} limit",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "juju_unit",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "query": "label_values(up, juju_unit)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  }
+}

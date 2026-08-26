@@ -1,0 +1,38 @@
+groups:
+  - name: pyxform
+    rules:
+      - alert: PyxformConversionFailing
+        expr: pyxform_conversion_success == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: XLSForm conversion is failing.
+          description: >-
+            A known-good XLSForm has not converted for ten minutes. No new form
+            can be published in ODK Central while this is true, and nothing else
+            will look wrong: existing forms keep working and submissions keep
+            arriving, so this failure is invisible until someone tries to
+            publish.
+
+      - alert: PyxformDown
+        expr: pyxform_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: The XLSForm conversion service is not answering.
+          description: >-
+            Publishing a new form in ODK Central will fail until this recovers.
+
+      - alert: PyxformConversionSlow
+        expr: pyxform_conversion_duration_seconds > 30
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: XLSForm conversion has become slow.
+          description: >-
+            A two-question form is taking more than 30 seconds to convert. Real
+            forms are much larger, so form publishing is likely to be timing
+            out. Check CPU limits and the workers setting.

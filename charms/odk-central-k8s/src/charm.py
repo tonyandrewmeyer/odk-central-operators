@@ -28,7 +28,9 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.data_platform_libs.v0.s3 import S3Requirer
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.hydra.v0.oauth import ClientConfig, OAuthRequirer
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
 from charms.odk_central_k8s.v0.odk_enketo import (
     ENKETO_PORT,
     SECRET_LABEL_API_KEY,
@@ -38,8 +40,10 @@ from charms.odk_central_k8s.v0.odk_enketo import (
     EnketoSecrets,
     OdkEnketoProvider,
 )
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.pyxform_k8s.v0.xlsform import XlsformRequirer
 from charms.smtp_integrator.v0.smtp import SmtpRequires
+from charms.tempo_coordinator_k8s.v0.tracing import TracingEndpointRequirer
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 
 logger = logging.getLogger(__name__)
@@ -98,6 +102,14 @@ OIDC_CALLBACK_PATH = "/v1/oidc/callback"
 # Central sends openid and email, and requires the email and email_verified
 # claims. profile is requested as well so that users get a display name.
 OIDC_SCOPES = "openid email profile"
+
+# ODK Central exposes no metrics: GET /v1/metrics is a 404 and central-backend
+# has no instrumentation dependencies. The charm ships an exporter that reads
+# the numbers an operator watches straight out of the database.
+EXPORTER_SERVICE = "exporter"
+EXPORTER_PORT = 9102
+EXPORTER_SOURCE = TEMPLATE_DIR.parent / "exporter" / "odk-exporter.js"
+EXPORTER_PATH = "/usr/odk/odk-exporter.js"
 BACKUP_TIMEOUT = 3600
 
 # Where a dump lives inside the service container while it is being moved.
@@ -261,6 +273,20 @@ class OdkCentralCharm(ops.CharmBase):
             ),
             relation_name="oauth",
         )
+        self.logging = LogForwarder(self, relation_name="logging")
+        self.metrics = MetricsEndpointProvider(
+            self,
+            relation_name="metrics-endpoint",
+            jobs=[{"static_configs": [{"targets": [f"*:{EXPORTER_PORT}"]}]}],
+            refresh_event=[self.on.config_changed],
+        )
+        self.dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
+        # The charm's own traces. central-backend has no OpenTelemetry
+        # dependencies and emits no spans of its own -- see
+        # docs/observability.md, which says so rather than pretending otherwise.
+        self.tracing = TracingEndpointRequirer(
+            self, relation_name="tracing", protocols=["otlp_http"]
+        )
 
         for event in (
             self.on.install,
@@ -368,9 +394,11 @@ class OdkCentralCharm(ops.CharmBase):
                 )
                 return
 
+        self._push_if_changed(container, EXPORTER_PATH, EXPORTER_SOURCE.read_text())
+
         container.add_layer(SERVICE_CONTAINER, self._service_layer(), combine=True)
         container.replan()
-        self.unit.set_ports(API_PORT, NGINX_PORT)
+        self.unit.set_ports(API_PORT, NGINX_PORT, EXPORTER_PORT)
 
         # Central reads config.json once, at startup, and replan only restarts a
         # service whose *layer* changed. Without this, a new database endpoint,
@@ -744,6 +772,20 @@ class OdkCentralCharm(ops.CharmBase):
                         "startup": "enabled",
                         "working-dir": WORKING_DIR,
                         "environment": self._service_environment(),
+                        "on-failure": "restart",
+                    },
+                    EXPORTER_SERVICE: {
+                        "override": "replace",
+                        "summary": "prometheus exporter",
+                        "command": f"node {EXPORTER_PATH}",
+                        "startup": "enabled",
+                        "working-dir": WORKING_DIR,
+                        "environment": {
+                            "EXPORTER_PORT": str(EXPORTER_PORT),
+                            # Whole-table counts; they do not need to be fresh
+                            # to the second and should not become database load.
+                            "EXPORTER_INTERVAL": "60",
+                        },
                         "on-failure": "restart",
                     },
                 },

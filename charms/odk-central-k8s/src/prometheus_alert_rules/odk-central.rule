@@ -1,0 +1,71 @@
+groups:
+  - name: odk-central
+    rules:
+      - alert: OdkCentralExporterDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: ODK Central is not answering.
+          description: >-
+            The exporter running alongside the ODK Central API has been
+            unreachable for more than two minutes. The unit is either down or
+            its workload container is not running, so form submission and the
+            web interface are unavailable.
+
+      - alert: OdkCentralDatabaseUnreachable
+        expr: odk_central_scrape_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: ODK Central cannot reach its database.
+          description: >-
+            The exporter is running but has not been able to query PostgreSQL
+            for more than two minutes. ODK Central keeps no state of its own, so
+            everything except cached web forms is unavailable in this state.
+
+      - alert: OdkCentralBlobUploadsStalled
+        expr: >-
+          min_over_time(odk_central_blobs_pending[1h]) > 0
+          and deriv(odk_central_blobs_pending[1h]) >= 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Submission attachments are not moving to the blob store.
+          description: >-
+            The pending blob count has not fallen for an hour and is not
+            falling. New submission attachments are accumulating in PostgreSQL
+            instead of moving to S3, which makes the database grow and leaves
+            those attachments outside the blob store's own backups. Run
+            `juju run odk-central-k8s/leader upload-pending-blobs` and check the
+            s3 relation.
+
+      - alert: OdkCentralBlobUploadsFailing
+        expr: odk_central_blobs_failed > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Some submission attachments have failed to upload.
+          description: >-
+            {{ $value }} attachments are in the failed state. They stay in
+            PostgreSQL until the upload is retried. Check the blob store's
+            credentials and capacity.
+
+      - alert: OdkCentralNoSubmissions
+        expr: >-
+          max_over_time(odk_central_submissions[6h])
+          - min_over_time(odk_central_submissions[6h]) == 0
+        for: 24h
+        labels:
+          severity: info
+        annotations:
+          summary: No submissions have been received for a day.
+          description: >-
+            This is informational and is often entirely normal -- field work is
+            not continuous. It is worth seeing when a deployment is expected to
+            be collecting data continuously, because a silent client-side
+            failure looks exactly like this.

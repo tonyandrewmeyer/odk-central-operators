@@ -13,12 +13,15 @@ from typing import Any
 from urllib.parse import urlparse
 
 import ops
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
 from charms.odk_central_k8s.v0.odk_enketo import (
     ENKETO_PORT,
     CentralDetails,
     OdkEnketoRequirer,
     SecretLengthError,
 )
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.redis_k8s.v0.redis import RedisRelationCharmEvents, RedisRequires
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,15 @@ SECRET_FILES = {
     "/etc/secrets/enketo-less-secret": "less_secure_key",
     "/etc/secrets/enketo-api-key": "api_key",
 }
+
+# Neither Enketo nor Redis exposes Prometheus metrics, so the charm ships a
+# small exporter. It speaks RESP to both Redis instances over a socket rather
+# than shelling out to redis-cli, which the Enketo image does not have -- and
+# which also makes a relation-backed instance scrape exactly like a sidecar.
+EXPORTER_SERVICE = "exporter"
+EXPORTER_PORT = 9104
+EXPORTER_SOURCE = TEMPLATE_DIR.parent / "exporter" / "enketo-exporter.js"
+EXPORTER_PATH = "/srv/enketo-exporter.js"
 
 VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
 
@@ -125,6 +137,14 @@ class EnketoCharm(ops.CharmBase):
         self.central = OdkEnketoRequirer(self)
         self.redis_main = RedisRequires(self, relation_name="redis-main")
         self.redis_cache = RedisRequires(self, relation_name="redis-cache")
+        self.logging = LogForwarder(self, relation_name="logging")
+        self.metrics = MetricsEndpointProvider(
+            self,
+            relation_name="metrics-endpoint",
+            jobs=[{"static_configs": [{"targets": [f"*:{EXPORTER_PORT}"]}]}],
+            refresh_event=[self.on.config_changed],
+        )
+        self.dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
 
         for event in (
             self.on.install,
@@ -200,9 +220,11 @@ class EnketoCharm(ops.CharmBase):
             permissions=0o600,
         )
 
+        changed |= push_if_changed(container, EXPORTER_PATH, EXPORTER_SOURCE.read_text())
+
         container.add_layer(ENKETO_CONTAINER, self._enketo_layer(), combine=True)
         container.replan()
-        self.unit.set_ports(ENKETO_PORT)
+        self.unit.set_ports(ENKETO_PORT, EXPORTER_PORT)
 
         # Enketo reads its configuration once, at startup. replan above only
         # restarts the service if the *layer* changed, so a new config.json or
@@ -401,6 +423,24 @@ class EnketoCharm(ops.CharmBase):
             "logo": {"source": "", "href": ""},
         }
 
+    def _exporter_environment(self) -> dict[str, str]:
+        """Return the exporter's view of where the two Redis instances live.
+
+        Supplied by the charm rather than discovered, so that a relation-backed
+        instance is scraped in exactly the same way as a sidecar.
+        """
+        main = self._redis_endpoint(REDIS_MAIN_CONTAINER)
+        cache = self._redis_endpoint(REDIS_CACHE_CONTAINER)
+        return {
+            "EXPORTER_PORT": str(EXPORTER_PORT),
+            "ENKETO_PORT": str(ENKETO_PORT),
+            "REDIS_MAIN_HOST": main.host,
+            "REDIS_MAIN_PORT": str(main.port),
+            "REDIS_CACHE_HOST": cache.host,
+            "REDIS_CACHE_PORT": str(cache.port),
+            "EXPORTER_INTERVAL": "60",
+        }
+
     def _enketo_layer(self) -> ops.pebble.Layer:
         """Build the Pebble layer for the Enketo workload."""
         return ops.pebble.Layer(
@@ -418,6 +458,14 @@ class EnketoCharm(ops.CharmBase):
                             "NODE_ENV": "production",
                             "ENKETO_LOG_LEVEL": str(self.config["log-level"]).lower(),
                         },
+                        "on-failure": "restart",
+                    },
+                    EXPORTER_SERVICE: {
+                        "override": "replace",
+                        "summary": "prometheus exporter",
+                        "command": f"node {EXPORTER_PATH}",
+                        "startup": "enabled",
+                        "environment": self._exporter_environment(),
                         "on-failure": "restart",
                     },
                 },

@@ -15,6 +15,9 @@ from typing import Any
 
 import ops
 import requests
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.pyxform_k8s.v0.xlsform import DEFAULT_PORT, XlsformProvider
 
 logger = logging.getLogger(__name__)
@@ -29,6 +32,17 @@ WORKING_DIR = "/app"
 
 CONVERT_PATH = "/api/v1/convert"
 PROBE_FORM = Path(__file__).parent / "probe-form.xlsx"
+
+# pyxform-http has no metrics of its own, so the charm ships a small exporter
+# that converts a known-good form on a timer. What matters operationally is not
+# request volume but whether conversion still works: a converter that is up but
+# failing blocks all form publishing in Central while everything else looks fine.
+EXPORTER_SERVICE = "exporter"
+EXPORTER_PORT = 9103
+EXPORTER_SOURCE = Path(__file__).parent / "exporter" / "pyxform-exporter.py"
+EXPORTER_PATH = "/usr/share/odk/pyxform-exporter.py"
+PROBE_FORM_PATH = "/usr/share/odk/probe-form.xlsx"
+PYTHON = "/app/.venv/bin/python"
 
 # Upstream runs one request per worker before recycling it. pyxform holds
 # process-global state between conversions, so this is not a tuning knob.
@@ -48,6 +62,14 @@ class PyxformCharm(ops.CharmBase):
     def __init__(self, framework: ops.Framework) -> None:
         super().__init__(framework)
         self.xlsform = XlsformProvider(self)
+        self.logging = LogForwarder(self, relation_name="logging")
+        self.metrics = MetricsEndpointProvider(
+            self,
+            relation_name="metrics-endpoint",
+            jobs=[{"static_configs": [{"targets": [f"*:{EXPORTER_PORT}"]}]}],
+            refresh_event=[self.on.config_changed],
+        )
+        self.dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
 
         framework.observe(self.on.install, self._on_lifecycle_event)
         framework.observe(self.on.config_changed, self._on_lifecycle_event)
@@ -113,9 +135,12 @@ class PyxformCharm(ops.CharmBase):
             self.unit.status = ops.WaitingStatus("waiting for the pyxform container")
             return
 
+        container.push(EXPORTER_PATH, EXPORTER_SOURCE.read_text(), make_dirs=True)
+        container.push(PROBE_FORM_PATH, PROBE_FORM.read_bytes(), make_dirs=True)
+
         container.add_layer(PEBBLE_SERVICE, self._pebble_layer(), combine=True)
         container.replan()
-        self.unit.set_ports(DEFAULT_PORT)
+        self.unit.set_ports(DEFAULT_PORT, EXPORTER_PORT)
 
         # Reaching active means the converter converts. A port check would pass
         # for a gunicorn that imports pyxform and then fails on every form.
@@ -182,6 +207,22 @@ class PyxformCharm(ops.CharmBase):
                         "command": command,
                         "startup": "enabled",
                         "working-dir": WORKING_DIR,
+                        "on-failure": "restart",
+                    },
+                    EXPORTER_SERVICE: {
+                        "override": "replace",
+                        "summary": "prometheus exporter",
+                        "command": f"{PYTHON} {EXPORTER_PATH}",
+                        "startup": "enabled",
+                        "environment": {
+                            "EXPORTER_PORT": str(EXPORTER_PORT),
+                            "PYXFORM_URL": f"http://localhost:{DEFAULT_PORT}",
+                            "PROBE_FORM": PROBE_FORM_PATH,
+                            # The probe is a real conversion; do not run it more
+                            # often than this however often Prometheus scrapes.
+                            "EXPORTER_INTERVAL": "60",
+                            "EXPORTER_TIMEOUT": str(int(self.config["conversion-timeout"])),
+                        },
                         "on-failure": "restart",
                     },
                 },
