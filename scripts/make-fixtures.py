@@ -28,6 +28,8 @@ TARGETS = (
     REPO_ROOT / "tests" / "data" / "minimal.xlsx",
 )
 
+ATTACHMENT_TARGETS = (REPO_ROOT / "tests" / "data" / "with-attachment.xlsx",)
+
 SURVEY = [
     ["type", "name", "label"],
     ["text", "name_of_respondent", "What is your name?"],
@@ -37,18 +39,32 @@ SETTINGS = [
     ["Minimal test form", "minimal_test_form", "1"],
 ]
 
+# A second form with a media question, so that the integration suite can submit
+# a real attachment. Attachments are what the S3 blob store is for, and the
+# partially-migrated state between PostgreSQL and the bucket cannot be exercised
+# without one.
+ATTACHMENT_SURVEY = [
+    ["type", "name", "label"],
+    ["text", "name_of_respondent", "What is your name?"],
+    ["image", "photo", "Take a photo"],
+]
+ATTACHMENT_SETTINGS = [
+    ["form_title", "form_id", "version"],
+    ["Attachment test form", "attachment_test_form", "1"],
+]
 
-def build(path: Path) -> None:
-    """Write the minimal XLSForm workbook to ``path``."""
+
+def build(path: Path, survey_rows: list[list[str]], settings_rows: list[list[str]]) -> None:
+    """Write an XLSForm workbook to ``path``."""
     workbook = Workbook()
     survey = workbook.active
     assert survey is not None
     survey.title = "survey"
-    for row in SURVEY:
+    for row in survey_rows:
         survey.append(row)
 
     settings = workbook.create_sheet("settings")
-    for row in SETTINGS:
+    for row in settings_rows:
         settings.append(row)
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,7 +77,7 @@ def main() -> int:
     parser.add_argument("--write", action="store_true", help="write the fixture files")
     args = parser.parse_args()
 
-    missing = [str(t) for t in TARGETS if not t.exists()]
+    missing = [str(t) for t in (*TARGETS, *ATTACHMENT_TARGETS) if not t.exists()]
     if not args.write:
         if missing:
             print(
@@ -75,7 +91,11 @@ def main() -> int:
         return 0
 
     for target in TARGETS:
-        build(target)
+        build(target, SURVEY, SETTINGS)
+        print(f"wrote {target.relative_to(REPO_ROOT)}")
+
+    for target in ATTACHMENT_TARGETS:
+        build(target, ATTACHMENT_SURVEY, ATTACHMENT_SETTINGS)
         print(f"wrote {target.relative_to(REPO_ROOT)}")
     return 0
 

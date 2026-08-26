@@ -1465,12 +1465,27 @@ class OdkCentralCharm(ops.CharmBase):
         return bool(digits) and int(digits) > 0
 
     def _pending_blob_count(self, container: ops.Container) -> int | None:
-        """Return how many blobs are still waiting to move to S3, if knowable."""
+        """Return how many blobs are still waiting to move to S3, if knowable.
+
+        Counted with a direct query rather than with `s3.js count-blobs`, which
+        requires the pgrowlocks extension. The database charm does not install
+        it and the relation user cannot add it, so upstream's counter is not
+        usable against a charm-managed database.
+        """
+        database = self._database_config()
+        if database is None:
+            return None
         try:
             process = container.exec(
-                [*S3_COMMAND, "count-blobs", "pending"],
-                working_dir=WORKING_DIR,
-                environment=self._service_environment(),
+                [
+                    "psql",
+                    "--no-psqlrc",
+                    "--tuples-only",
+                    "--no-align",
+                    "--command",
+                    "select count(*) from blobs where s3_status = 'pending'",
+                ],
+                environment=self._backup_environment(database),
                 timeout=60,
             )
             output, _ = process.wait_output()
