@@ -19,6 +19,14 @@
 # Everything else is upstream's, verbatim. When bumping the pinned release,
 # refresh hack/upstream/ first and re-apply these changes to the new file.
 
+# Added by the charm, not upstream. nginx sizes this hash from the longest
+# server_name, and its default of 64 bytes is not enough for the names Juju
+# produces: "<model>-<application>.<ingress-host>" runs well past it, and nginx
+# refuses to start with "could not build server_names_hash". Upstream never hits
+# this because a compose deployment is configured with a short, human-chosen
+# domain.
+server_names_hash_bucket_size 128;
+
 server {
   listen 443 default_server ssl;
   server_tokens off;

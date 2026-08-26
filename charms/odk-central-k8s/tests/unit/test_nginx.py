@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+import ops
+import pytest
 from charm import OdkCentralCharm
 from ops import testing
 
@@ -437,3 +439,52 @@ def test_nginx_health_check_does_not_depend_on_the_host_header(
     assert check.http is None
     assert check.exec is not None
     assert check.exec["command"] == "nc -z localhost 80"
+
+
+def test_long_hostnames_do_not_break_nginx(
+    ctx: testing.Context[OdkCentralCharm],
+    service: testing.Container,
+    nginx: testing.Container,
+    postgresql: testing.Relation,
+) -> None:
+    """nginx sizes its server-name hash from the longest name it serves.
+
+    The default of 64 bytes is not enough for the hostnames Juju produces --
+    "<model>-<application>.<ingress-host>" -- and nginx refuses to start with
+    "could not build server_names_hash" rather than truncating. Upstream never
+    hits this because a compose deployment uses a short, human-chosen domain.
+    """
+    state_in = testing.State(
+        containers={service, nginx},
+        relations={postgresql},
+        leader=True,
+        config={"external-hostname": "some-long-model-name-odk-central-k8s.10-43-45-0.nip.io"},
+    )
+
+    state_out = ctx.run(ctx.on.config_changed(), state_in)
+
+    assert "server_names_hash_bucket_size 128;" in pushed_to_nginx(state_out, ctx, NGINX_CONF)
+
+
+def test_a_workload_that_will_not_start_blocks_rather_than_erroring(
+    ctx: testing.Context[OdkCentralCharm],
+    service: testing.Container,
+    postgresql: testing.Relation,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An invalid generated config is an operator problem, not a traceback."""
+
+    def refuse(self: object, *service_names: str) -> None:
+        raise testing.pebble.ChangeError("nginx: [emerg] bad config", change=None)
+
+    monkeypatch.setattr(ops.Container, "start", refuse)
+    state_in = testing.State(
+        containers={service, testing.Container("nginx", can_connect=True)},
+        relations={postgresql},
+        leader=True,
+    )
+
+    state_out = ctx.run(ctx.on.config_changed(), state_in)
+
+    assert isinstance(state_out.unit_status, testing.BlockedStatus)
+    assert "nginx did not start" in state_out.unit_status.message

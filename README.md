@@ -71,12 +71,15 @@ The full walkthrough, from an empty model to a first submission, is in
 | `odk-central-k8s` | `s3` | `s3` | requires | Blob store for submission attachments and form media |
 | `odk-central-k8s` | `smtp` | `smtp` | requires | Account creation and password reset email |
 | `odk-central-k8s` | `oauth` | `oauth` | requires | OpenID Connect via the Canonical Identity Platform |
-| `odk-central-k8s` | `logging` / `metrics-endpoint` / `grafana-dashboard` / `tracing` | COS | requires | Observability |
+| `odk-central-k8s` | `metrics-endpoint` / `grafana-dashboard` | COS | provides | Metrics and dashboards |
+| `odk-central-k8s` | `logging` / `tracing` | COS | requires | Log forwarding and charm traces |
 | `enketo-k8s` | `odk-enketo` | `odk-enketo` | requires | Shared secrets and base URL from Central |
 | `enketo-k8s` | `redis-main` / `redis-cache` | `redis` | requires (optional) | External Redis instead of the in-charm sidecars |
-| `enketo-k8s` | `logging` / `metrics-endpoint` / `grafana-dashboard` | COS | requires | Observability |
+| `enketo-k8s` | `metrics-endpoint` / `grafana-dashboard` | COS | provides | Metrics and dashboards |
+| `enketo-k8s` | `logging` | COS | requires | Log forwarding |
 | `pyxform-k8s` | `xlsform` | `odk-xlsform` | provides | Advertises its host and port to Central |
-| `pyxform-k8s` | `logging` / `metrics-endpoint` | COS | requires | Observability |
+| `pyxform-k8s` | `metrics-endpoint` / `grafana-dashboard` | COS | provides | Metrics |
+| `pyxform-k8s` | `logging` | COS | requires | Log forwarding |
 
 `pyxform-k8s` has no ingress endpoint on purpose: it is reached only by
 Central, in-cluster, and must not be exposed.
@@ -92,7 +95,7 @@ Central, in-cluster, and must not be exposed.
 | `odk-central-k8s` | `run-migrations` | Run database migrations manually. |
 | `odk-central-k8s` | `upload-pending-blobs` | Move submission attachments still held in PostgreSQL to the S3 blob store. |
 | `odk-central-k8s` | `purge-deleted` | Permanently remove soft-deleted forms and submissions. |
-| `odk-central-k8s` | `backup` | `pg_dump` the Central database to the S3 blob store. |
+| `odk-central-k8s` | `backup` | `pg_dump` the Central database to the S3 blob store. Needs PostgreSQL 14. |
 | `odk-central-k8s` | `restore` | Restore the Central database from a backup snapshot. |
 | `enketo-k8s` | `flush-cache` | Flush the cache Redis instance only, never the durable one. |
 | `enketo-k8s` | `redis-info` | Return `INFO` output from both Redis instances. |
@@ -108,13 +111,22 @@ every Pebble service's logs to Loki, expose Prometheus metrics, and ship a
 Grafana dashboard and alert rules covering API availability, pending blob
 uploads, Redis reachability and pyxform conversion failures.
 
+None of the three workloads exposes metrics of its own, so each charm ships a
+small exporter as an extra Pebble service. Thirteen alert rules and two Grafana
+dashboards come with them.
+
 ```bash
-juju integrate odk-central-k8s grafana-k8s
-juju integrate odk-central-k8s prometheus-k8s
-juju integrate odk-central-k8s loki-k8s
+juju deploy loki-k8s       --channel 3.7/stable  --trust
+juju deploy prometheus-k8s --channel 3.11/stable --trust
+juju deploy grafana-k8s    --channel 12.4/stable --trust
+
+juju integrate odk-central-k8s:logging loki-k8s
+juju integrate odk-central-k8s:metrics-endpoint prometheus-k8s
+juju integrate odk-central-k8s:grafana-dashboard grafana-k8s
 ```
 
-See [`docs/observability.md`](docs/observability.md).
+See [`docs/observability.md`](docs/observability.md), which also explains why
+the tracing relation carries the charm's own spans rather than the workload's.
 
 ## Contributing
 

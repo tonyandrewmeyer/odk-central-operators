@@ -413,7 +413,12 @@ class OdkCentralCharm(ops.CharmBase):
             self.unit.status = ops.WaitingStatus("waiting for the api to become healthy")
             return
 
-        self._reconcile_nginx()
+        if not self._reconcile_nginx():
+            self.unit.status = ops.BlockedStatus(
+                "nginx did not start; see juju debug-log for its output"
+            )
+            return
+
         self.unit.status = self._status(container)
 
     def _status(self, container: ops.Container | None = None) -> ops.StatusBase:
@@ -891,8 +896,10 @@ class OdkCentralCharm(ops.CharmBase):
             "    return 204;\n",
         )
 
-    def _reconcile_nginx(self) -> None:
+    def _reconcile_nginx(self) -> bool:
         """Push the nginx templates and (re)start the frontend proxy.
+
+        :returns: whether nginx is running.
 
         A change to DOMAIN, OIDC_ENABLED or the Sentry settings is a re-render,
         not just a restart: the browser reads client-config.json at page load
@@ -902,7 +909,7 @@ class OdkCentralCharm(ops.CharmBase):
         """
         container = self.unit.get_container(NGINX_CONTAINER)
         if not container.can_connect():
-            return
+            return False
 
         template = self._nginx_config_template()
         changed = self._push_if_changed(
@@ -921,11 +928,22 @@ class OdkCentralCharm(ops.CharmBase):
         environment_changed = self._environment_changed(container, layer)
         container.add_layer(NGINX_CONTAINER, layer, combine=True)
 
+        # A workload that refuses to start is a deployment problem to report,
+        # not a charm error to raise: nginx will not start if its generated
+        # configuration is invalid, and an operator needs to see why rather than
+        # a traceback.
         service = container.get_services().get(NGINX_CONTAINER)
-        if service is None or not service.is_running():
-            container.start(NGINX_CONTAINER)
-        elif changed or environment_changed:
-            container.restart(NGINX_CONTAINER)
+        try:
+            if service is None or not service.is_running():
+                container.start(NGINX_CONTAINER)
+            elif changed or environment_changed:
+                container.restart(NGINX_CONTAINER)
+        except ops.pebble.ChangeError as exc:
+            # exc.err, not exc: ChangeError's own string representation walks
+            # the change's tasks, which is not always populated.
+            logger.error("nginx did not start: %s", exc.err)
+            return False
+        return True
 
     @staticmethod
     def _environment_changed(container: ops.Container, layer: ops.pebble.Layer) -> bool:

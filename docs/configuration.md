@@ -9,6 +9,42 @@ secrets and DSNs are all Juju secrets — see
 [Secrets](day2-ops.md#secrets) — so that nothing sensitive appears in
 `juju config <charm> --format=json`.
 
+Two options are of type `secret`: they hold a Juju secret **URI**, not a value.
+
+```bash
+SECRET_ID=$(juju add-secret odk-admin-email email=ops-team@example.com)
+juju grant-secret "$SECRET_ID" odk-central-k8s
+juju config odk-central-k8s admin-email-secret="$SECRET_ID"
+```
+
+## Options worth reading twice
+
+Most of these are self-explanatory. These four are not.
+
+**`external-hostname`** takes precedence over the hostname the `ingress`
+relation supplies, for when your users type a different name than traefik knows
+about. ODK Central will not work with a bare IP: the frontend bakes its origin
+into the client configuration the browser reads at page load, and Enketo's
+linked-server URL has to match.
+
+**`oidc-enabled`** is effectively a one-way door. Turning it on disables
+password authentication entirely — `POST /v1/sessions` stops existing and every
+existing password user is locked out. Turning it back off does not restore
+their sessions. Setting it without a usable provider blocks rather than
+advertising a login that cannot work.
+
+**`error-reporting-dsn`** is empty by default, and that default is
+load-bearing. Upstream's shipped compose configuration contains the ODK
+project's own Sentry organisation, key and project id, so a deployment that
+inherited them would report its errors to ODK's telemetry. These charms never
+do; leaving this empty blanks every Sentry value and replaces the frontend's
+report endpoint with a local `204`.
+
+**`conversion-timeout`** on `pyxform-k8s` defaults to 60 seconds, where the
+published image's own default is 600. The lower value surfaces a wedged
+converter quickly, but large forms with many translations legitimately take
+tens of seconds — raise it if publishing a real form starts timing out.
+
 ## `odk-central-k8s`
 
 <!-- BEGIN GENERATED CONFIG: odk-central-k8s -->
