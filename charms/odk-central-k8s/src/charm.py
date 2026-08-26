@@ -23,11 +23,13 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
 )
 from charms.odk_central_k8s.v0.odk_enketo import (
+    ENKETO_PORT,
     SECRET_LABEL_API_KEY,
     SECRET_LABEL_ENCRYPTION_KEY,
     SECRET_LABEL_LESS_SECURE_KEY,
     SECRET_LENGTHS,
     EnketoSecrets,
+    OdkEnketoProvider,
 )
 from charms.pyxform_k8s.v0.xlsform import XlsformRequirer
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
@@ -129,6 +131,7 @@ class OdkCentralCharm(ops.CharmBase):
             database_name=DATABASE_NAME,
         )
         self.xlsform = XlsformRequirer(self)
+        self.enketo = OdkEnketoProvider(self)
         self.ingress = IngressPerAppRequirer(
             self,
             relation_name="ingress",
@@ -152,6 +155,7 @@ class OdkCentralCharm(ops.CharmBase):
             self.xlsform.on.xlsform_gone,
             self.ingress.on.ready,
             self.ingress.on.revoked,
+            self.enketo.on.enketo_url_changed,
             self.on[NGINX_CONTAINER].pebble_ready,
         ):
             framework.observe(event, self._on_lifecycle_event)
@@ -186,6 +190,14 @@ class OdkCentralCharm(ops.CharmBase):
         if shared_secrets is None:
             self.unit.status = ops.WaitingStatus("waiting for the leader to generate secrets")
             return
+
+        # Publish to Enketo before the database check. Enketo cannot start until
+        # it has these, and blocking that on Central's own database would mean
+        # a database problem takes the web forms down as well.
+        self.enketo.publish(
+            base_url=self._external_url(),
+            support_email=str(self.config["sysadmin-email"]),
+        )
 
         database = self._database_config()
         if database is None:
@@ -229,9 +241,14 @@ class OdkCentralCharm(ops.CharmBase):
 
     def _status(self) -> ops.StatusBase:
         """Return the status that reflects what is and is not yet wired up."""
+        missing: list[str] = []
         if self.xlsform.endpoint is None:
-            return ops.ActiveStatus("api ready; no xlsform relation, form publishing will fail")
-        return ops.ActiveStatus("api ready; awaiting enketo")
+            missing.append("xlsform (form publishing will fail)")
+        if self.enketo.enketo_url is None:
+            missing.append("enketo (web forms will not render)")
+        if missing:
+            return ops.ActiveStatus(f"api ready; waiting for {', '.join(missing)}")
+        return ops.ActiveStatus()
 
     def _invalid_config(self) -> str | None:
         """Return a message describing the first invalid config option, if any."""
@@ -375,7 +392,7 @@ class OdkCentralCharm(ops.CharmBase):
                     "port": endpoint.port if endpoint else 80,
                 },
                 "enketo": {
-                    "url": ENKETO_URL_PLACEHOLDER,
+                    "url": self._enketo_url(),
                     "apiKey": shared_secrets.api_key,
                 },
                 "env": {
@@ -492,11 +509,27 @@ class OdkCentralCharm(ops.CharmBase):
             "SENTRY_DSN_FRONTEND": dsn,
         }
 
+    def _enketo_url(self) -> str:
+        """Return the URL for Central's ``enketo.url``, or the placeholder.
+
+        The placeholder keeps Central startable before Enketo exists. It is
+        never a working address, and web forms fail until Enketo answers, but
+        that is strictly better than a deadlock: Enketo cannot answer until
+        Central has published the shared secrets.
+        """
+        return self.enketo.enketo_url or ENKETO_URL_PLACEHOLDER
+
     def _enketo_upstream(self) -> str:
-        """Return the host:port nginx should proxy the /- paths to."""
-        # Phase-appropriate placeholder until the odk-enketo relation settles;
-        # nginx must still load a valid configuration in the meantime.
-        return "127.0.0.1:8005"
+        """Return the host:port nginx should proxy the /- paths to.
+
+        nginx has to load a valid configuration whether or not Enketo is
+        related, so this falls back to a local address that simply refuses
+        connections rather than to something nginx cannot resolve at all.
+        """
+        parsed = urlparse(self._enketo_url())
+        if not parsed.hostname or parsed.hostname == urlparse(ENKETO_URL_PLACEHOLDER).hostname:
+            return f"127.0.0.1:{ENKETO_PORT}"
+        return f"{parsed.hostname}:{parsed.port or ENKETO_PORT}"
 
     def _nginx_config_template(self) -> str:
         """Return the nginx site template, adjusted for the Sentry setting.

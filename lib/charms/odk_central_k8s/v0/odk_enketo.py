@@ -215,6 +215,22 @@ class OdkEnketoProviderEvents(ops.ObjectEvents):
     enketo_url_changed = ops.EventSource(EnketoUrlChangedEvent)
 
 
+# Databag keys. The secrets themselves never cross the relation: only the IDs
+# of Juju secrets that the provider has granted to the requirer.
+FIELD_API_KEY_ID = "api-key-secret-id"
+FIELD_ENCRYPTION_KEY_ID = "encryption-key-secret-id"
+FIELD_LESS_SECURE_KEY_ID = "less-secure-key-secret-id"
+FIELD_BASE_URL = "base-url"
+FIELD_SUPPORT_EMAIL = "support-email"
+FIELD_ENKETO_URL = "enketo-url"
+
+SECRET_ID_FIELDS = {
+    SECRET_LABEL_API_KEY: FIELD_API_KEY_ID,
+    SECRET_LABEL_ENCRYPTION_KEY: FIELD_ENCRYPTION_KEY_ID,
+    SECRET_LABEL_LESS_SECURE_KEY: FIELD_LESS_SECURE_KEY_ID,
+}
+
+
 class OdkEnketoProvider(ops.Object):
     """Provider side of ``odk-enketo``, implemented by ``odk-central-k8s``."""
 
@@ -229,13 +245,30 @@ class OdkEnketoProvider(ops.Object):
         self._charm = charm
         self._relation_name = relation_name
 
+        events = charm.on[relation_name]
+        self.framework.observe(events.relation_changed, self._on_relation_changed)
+        self.framework.observe(events.relation_broken, self._on_relation_changed)
+
     def publish(self, base_url: str, support_email: str = "") -> None:
         """Grant the three Juju secrets to the relation and publish their IDs.
 
         Safe to call on every hook: it is a reconcile, not a one-shot, so a
         rotation is published simply by calling it again.
         """
-        raise NotImplementedError  # Implemented in the enketo phase.
+        if not self._charm.unit.is_leader():
+            return
+
+        for relation in self._charm.model.relations.get(self._relation_name, ()):
+            databag = {FIELD_BASE_URL: base_url, FIELD_SUPPORT_EMAIL: support_email}
+            for label, field in SECRET_ID_FIELDS.items():
+                secret = self._charm.model.get_secret(label=label)
+                # Granting is idempotent, and has to happen before the requirer
+                # can read the secret by ID.
+                secret.grant(relation)
+                if secret.id is None:  # pragma: no cover - defensive
+                    raise RuntimeError(f"secret {label} has no ID to publish")
+                databag[field] = secret.id
+            relation.data[self._charm.app].update(databag)
 
     @property
     def enketo_url(self) -> str | None:
@@ -245,7 +278,14 @@ class OdkEnketoProvider(ops.Object):
         than waiting, because Enketo cannot answer until Central has published
         the secrets.
         """
-        raise NotImplementedError  # Implemented in the enketo phase.
+        relation = self._charm.model.get_relation(self._relation_name)
+        if relation is None or relation.app is None:
+            return None
+        return relation.data[relation.app].get(FIELD_ENKETO_URL) or None
+
+    def _on_relation_changed(self, event: ops.RelationEvent) -> None:
+        """Tell the charm that Enketo's advertised URL may have changed."""
+        self.on.enketo_url_changed.emit()
 
 
 class OdkEnketoRequirer(ops.Object):
@@ -262,11 +302,85 @@ class OdkEnketoRequirer(ops.Object):
         self._charm = charm
         self._relation_name = relation_name
 
+        events = charm.on[relation_name]
+        self.framework.observe(events.relation_changed, self._on_relation_changed)
+        self.framework.observe(events.relation_broken, self._on_relation_broken)
+        # A rotation arrives as secret-changed, not relation-changed: the IDs in
+        # the databag stay the same while their contents move on.
+        self.framework.observe(charm.on.secret_changed, self._on_secret_changed)
+
     @property
     def central(self) -> CentralDetails | None:
         """Central's secrets and base URL, or ``None`` if not yet published."""
-        raise NotImplementedError  # Implemented in the enketo phase.
+        relation = self._charm.model.get_relation(self._relation_name)
+        if relation is None or relation.app is None:
+            return None
+        return self._read(relation)
+
+    def _read(self, relation: ops.Relation) -> CentralDetails | None:
+        """Parse one relation's databag, tolerating an incomplete one."""
+        if relation.app is None:
+            return None
+        databag = relation.data[relation.app]
+
+        base_url = databag.get(FIELD_BASE_URL)
+        if not base_url:
+            return None
+
+        values: dict[str, str] = {}
+        for label, field in SECRET_ID_FIELDS.items():
+            secret_id = databag.get(field)
+            if not secret_id:
+                return None
+            try:
+                content = self._charm.model.get_secret(id=secret_id).get_content(refresh=True)
+            except (ops.SecretNotFoundError, ops.ModelError):
+                # Normal between the ID being published and the grant landing.
+                logger.debug("secret %s for %s is not readable yet", secret_id, field)
+                return None
+            values[label] = content["value"]
+
+        secrets = EnketoSecrets(
+            api_key=values[SECRET_LABEL_API_KEY],
+            encryption_key=values[SECRET_LABEL_ENCRYPTION_KEY],
+            less_secure_key=values[SECRET_LABEL_LESS_SECURE_KEY],
+        )
+        # Fail here rather than after writing a bad file into the container.
+        secrets.validate()
+
+        return CentralDetails(
+            secrets=secrets,
+            base_url=base_url,
+            support_email=databag.get(FIELD_SUPPORT_EMAIL, ""),
+        )
 
     def publish_url(self, url: str) -> None:
         """Tell Central the URL at which it should reach Enketo."""
-        raise NotImplementedError  # Implemented in the enketo phase.
+        if not self._charm.unit.is_leader():
+            return
+        for relation in self._charm.model.relations.get(self._relation_name, ()):
+            relation.data[self._charm.app][FIELD_ENKETO_URL] = url
+
+    def _on_relation_changed(self, event: ops.RelationChangedEvent) -> None:
+        """Emit ready or gone as Central's published data changes."""
+        if self._read(event.relation) is None:
+            self.on.odk_enketo_gone.emit()
+        else:
+            self.on.odk_enketo_ready.emit()
+
+    def _on_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
+        """Emit gone when Central goes away."""
+        self.on.odk_enketo_gone.emit()
+
+    def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
+        """Re-read the secrets when Central rotates them."""
+        relation = self._charm.model.get_relation(self._relation_name)
+        if relation is None or relation.app is None:
+            return
+        databag = relation.data[relation.app]
+        if event.secret.id not in {databag.get(field) for field in SECRET_ID_FIELDS.values()}:
+            return
+        if self._read(relation) is None:
+            self.on.odk_enketo_gone.emit()
+        else:
+            self.on.odk_enketo_ready.emit()
