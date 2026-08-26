@@ -57,3 +57,8 @@ ignore_errors = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-ra"
+filterwarnings = [
+    "error",
+    # Raised inside the vendored data_platform_libs charm library, not our code.
+    "ignore:JujuVersion.from_environ.. is deprecated:DeprecationWarning",
+]
