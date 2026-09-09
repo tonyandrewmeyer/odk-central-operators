@@ -14,9 +14,9 @@ boto3==1.43.87 \
     --hash=sha256:671cf88a353f887774603980898bc34249d05a994e1c5e24aba4f4e1bbef0951 \
     --hash=sha256:8d9521c7c292194b8ce9fb61043d52e45cdba29b5f690981f3eb5e75103ba57d
     # via odk-central-k8s
-botocore==1.43.80 \
-    --hash=sha256:461bce2159eadd758d0651d2a11dced3450169383e6ca8ef65f5c250f8b7ebd4 \
-    --hash=sha256:c021e60df26d17e9a8db05fa5071669449c8fd15e0fb4374f56a6c17d553f89b
+botocore==1.43.87 \
+    --hash=sha256:01e1e2255a8f4b959c19b210d74a5a916d13841c0344ceee15d8a3eaa4daa892 \
+    --hash=sha256:928598e7275fa70385d7f694d60d59afe115a0b914cc699dbf3eb60954c23bf1
     # via
     #   boto3
     #   s3transfer
