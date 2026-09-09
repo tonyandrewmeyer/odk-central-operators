@@ -169,9 +169,9 @@ ops==3.8.1 \
     #   cosl
     #   ops-tracing
     #   pyxform-k8s
-ops-tracing==3.8.1 \
-    --hash=sha256:04f32240bc93e32269ae64b3c9a4b00fcd6831088bdf02bf01b3278e3d52b73f \
-    --hash=sha256:b43b108cf1997c12cf5b0526b8ae0bfbba11c704b4017d6be71dcf5335c883eb
+ops-tracing==3.8.2 \
+    --hash=sha256:30049c9a28688dad4f34653b983daf9a7904ebc7d56203639ae2e99fdf7c388f \
+    --hash=sha256:5809909692210aa3d782cad93a631fa69653b304d2abdc185922cca76e59621a
     # via ops
 pydantic==2.13.4 \
     --hash=sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba \
