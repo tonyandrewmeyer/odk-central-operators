@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Because the three charms in this repository are released as a group, one
 changelog covers all of them. Entries name the charm they affect.
 
+## [0.2.0](https://github.com/tonyandrewmeyer/odk-central-operators/compare/v0.1.0...v0.2.0) (2026-09-09)
+
+
+### Features
+
+* **central:** backup and restore to the S3 blob store ([97d6502](https://github.com/tonyandrewmeyer/odk-central-operators/commit/97d65029e358ef4cf1893d75bc4c4682e3d459ba))
+* **central:** nginx container, frontend config, traefik ingress ([9069248](https://github.com/tonyandrewmeyer/odk-central-operators/commit/9069248f6de29a2c8eaeb131d9534d0bc83a3c5e))
+* **central:** postgresql relation, config render, migrations, api service ([c742a8b](https://github.com/tonyandrewmeyer/odk-central-operators/commit/c742a8b8e4b1cbed740d98e466baaef28af4be2e))
+* **central:** s3 blob store, smtp, oidc via hydra or config ([a0af96a](https://github.com/tonyandrewmeyer/odk-central-operators/commit/a0af96aa8d2fd06a53ddb3b2b1454505d6576c5c))
+* **charms:** charmcraft scaffolds for all three charms ([bc4008f](https://github.com/tonyandrewmeyer/odk-central-operators/commit/bc4008f3e04221a925f871df0f596e25bbd75e72))
+* **charms:** COS-Lite observability across the group ([0bc8f1b](https://github.com/tonyandrewmeyer/odk-central-operators/commit/0bc8f1b055bae9b0ba1974a3ffafd43fd47f8a06))
+* **charms:** day-2 actions across the group ([125ab24](https://github.com/tonyandrewmeyer/odk-central-operators/commit/125ab246270f6e2412e245505a62cd29f766a90d))
+* **enketo:** shared-secret provider/requirer, redis pair, enketo workload ([606baa9](https://github.com/tonyandrewmeyer/odk-central-operators/commit/606baa91457cc559267f4ab3e98a6fb068a8e9ab))
+* **pyxform:** workload, xlsform interface, conversion probe ([0030a1f](https://github.com/tonyandrewmeyer/odk-central-operators/commit/0030a1faca02944970f52a8d20e771fa28096048))
+
+
+### Bug Fixes
+
+* **central:** nginx re-render, health check and migration gating ([c3c799f](https://github.com/tonyandrewmeyer/odk-central-operators/commit/c3c799f4299075b7bc3c1f90dcf9c8a8c1b002e1))
+* **central:** nginx server-name hash size, and report a failed start ([3a9cc63](https://github.com/tonyandrewmeyer/odk-central-operators/commit/3a9cc6319e220e89030fe58a6d186ac9f9a56560))
+* **central:** render the rotated secrets in the hook that generates them ([56dd281](https://github.com/tonyandrewmeyer/odk-central-operators/commit/56dd281b2274b1d406535a63f2b2708ba87c4ba3))
+* **enketo:** make a secret rotation visible over the relation ([275618f](https://github.com/tonyandrewmeyer/odk-central-operators/commit/275618f2d5a7e480441cfaee1eaa26446175abd0))
+
 ## [Unreleased]
 
 ## [0.1.0] - 2026-08-26
