@@ -328,9 +328,9 @@ ops==3.8.2 \
     #   cosl
     #   odk-central-k8s
     #   ops-tracing
-ops-tracing==3.8.1 \
-    --hash=sha256:04f32240bc93e32269ae64b3c9a4b00fcd6831088bdf02bf01b3278e3d52b73f \
-    --hash=sha256:b43b108cf1997c12cf5b0526b8ae0bfbba11c704b4017d6be71dcf5335c883eb
+ops-tracing==3.8.2 \
+    --hash=sha256:30049c9a28688dad4f34653b983daf9a7904ebc7d56203639ae2e99fdf7c388f \
+    --hash=sha256:5809909692210aa3d782cad93a631fa69653b304d2abdc185922cca76e59621a
     # via ops
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
     --hash=sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29 \
