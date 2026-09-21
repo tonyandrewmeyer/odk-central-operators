@@ -10,9 +10,9 @@ attrs==26.1.0 \
     # via
     #   jsonschema
     #   referencing
-boto3==1.43.87 \
-    --hash=sha256:671cf88a353f887774603980898bc34249d05a994e1c5e24aba4f4e1bbef0951 \
-    --hash=sha256:8d9521c7c292194b8ce9fb61043d52e45cdba29b5f690981f3eb5e75103ba57d
+boto3==1.43.91 \
+    --hash=sha256:5ff948cfac8bff72227930e0894a8542731e1998634d1ffd8a074c20a90af919 \
+    --hash=sha256:98643e500883bf6fcd13d04bb19da983bf97e5f1c600fc11470ce45437fa96b4
     # via odk-central-k8s
 botocore==1.43.87 \
     --hash=sha256:01e1e2255a8f4b959c19b210d74a5a916d13841c0344ceee15d8a3eaa4daa892 \
